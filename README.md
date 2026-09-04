@@ -1,48 +1,129 @@
-# repo-template
+# sub1
 
-Starter template for repositories in iwamot's ecosystem.
+[![release](https://img.shields.io/github/v/release/iwamot/sub1)](https://github.com/iwamot/sub1/releases)
+[![Go](https://img.shields.io/github/go-mod/go-version/iwamot/sub1)](https://pkg.go.dev/github.com/iwamot/sub1)
 
-## Files
+Replace a literal text block in a file, exactly once. Built for coding agents that edit through the shell.
 
-| Path | Purpose |
-|------|---------|
-| `.github/Oidefile` | Manifest of files this template distributes. `oide.yml` pulls every listed path into derived repos. |
-| `.github/release.yml` | GitHub auto-generated release notes categorization (Features / Dependencies). |
-| `.github/renovate.json` | Extends the `iwamot/renovate-config` preset. |
-| `.github/workflows/auto-label.yml` | Labels PRs from their Conventional Commit title. |
-| `.github/workflows/dco.yml` | Checks that every PR commit carries a DCO sign-off. |
-| `.github/workflows/dependabot-auto-merge.yml` | Auto-merges Dependabot PRs. |
-| `.github/workflows/dependency-review.yml` | Vulnerability and license review on PRs. |
-| `.github/workflows/oide.yml` | Pulls the files listed in `.github/Oidefile` from this template. See [Staying in sync](#staying-in-sync). |
-| `.github/workflows/release.yml` | Creates a GitHub Release when a `v*` tag is pushed. |
-| `.github/workflows/renovate.yml` | Self-hosted Renovate runner (every 6 hours + on push to main). |
-| `.github/workflows/validate.yml` | Runs `validate.sh` on push and PR via `iwamot/workflows`. |
-| `CONTRIBUTING.md` | Contribution guide: local setup, DCO, and Conventional Commits. |
-| `LICENSE` | Project license. |
-| `SECURITY.md` | Minimal security policy. Directs vulnerability reports to GitHub Security Advisories. |
-| `mise.toml` | Pins mise minimum version and includes shared tasks from `iwamot/mise-tasks`. |
-| `validate.sh` | Lint entry point invoked by `iwamot/actions/mise-validate`. Add repo-specific lint at the marked location. |
+```
+$ sub1 app.py <<'SUB1'
+    if reply is None:
+        return
+====
+    if reply is None:
+        return None
+SUB1
+app.py: replaced at line 42
+```
 
-## Staying in sync
+The old and new blocks come from a heredoc, so nothing needs escaping. The file is rewritten only when the old block occurs exactly once. Otherwise it is left alone, the count is reported, and the exit code is 1.
 
-This template owns the shared governance files — the paths listed in `.github/Oidefile`. Derived repositories track it through two automated flows:
+## Why
 
-- **Governance files** — `.github/workflows/oide.yml` runs [`iwamot/oide`](https://github.com/iwamot/oide), which pulls every path listed in `.github/Oidefile` from this template and opens a PR. Its `SOURCES` input pins this template by tag, and Renovate tracks that pin, so tagging a new template release bumps it, which triggers the pull. `.github/Oidefile` lists itself, so adding a path to the template's manifest propagates to every derived repo in one pull.
-- **Version pins** — Renovate keeps the action SHAs in `.github/workflows/*.yml` and the task ref in `mise.toml` current.
+An agent that edits through a shell has two common tools, and both are bad at it.
 
-## Post-creation setup
+`sed -i` succeeds even when the old text is not in the file, so a missed edit goes unnoticed. Multi-line text and characters like `/`, `&`, and `$` need escaping, which is where edits go wrong.
 
-After clicking **Use this template**:
+A Python one-off that reads the file, asserts the old text occurs once, replaces it, and writes it back does the right thing. But the agent re-types it for every edit. In one month of the author's Claude Code sessions, that script was written by hand more than 700 times.
 
-1. **Replace this README.md** with the new repository's own description.
-2. **Install the Renovate App** (or your self-hosted equivalent) for the new repo.
-3. **Create a GitHub Environment** for Renovate (default name: `production`, override via the `environment` input on `renovate.yml` if needed) and add environment-scoped secrets:
-   - `RENOVATE_APP_CLIENT_ID`
-   - `RENOVATE_APP_PRIVATE_KEY`
-4. **Add a release workflow** if the repo ships artifacts. These also take an `environment` input — create additional environments as needed:
-   - `iwamot/workflows/.github/workflows/release-ghcr.yml` for GHCR
-   - `iwamot/workflows/.github/workflows/release-ecr-public.yml` for ECR Public
-   - `iwamot/workflows/.github/workflows/release-homebrew-tap.yml` for Homebrew tap
-5. **Add language-specific files** as needed: `Dockerfile`, `package.json`, `pyproject.toml`, `.gitignore`, etc.
-6. **Extend `validate.sh`** with repo-specific lint (e.g. `mise run docker-lint Dockerfile`, language linters).
-7. **Review `mise.toml`'s `min_version`**: the template provides a default, but the minimum mise version is each repository's own decision. Bump it if your tasks require a newer feature, or drop it if no constraint is needed. This is *not* auto-bumped by Renovate.
+`sub1` is that script, made into a command.
+
+## Setup
+
+Install it where the agent runs:
+
+```bash
+brew install iwamot/tap/sub1
+```
+
+Or with Go:
+
+```bash
+go install github.com/iwamot/sub1@latest
+```
+
+Or download a prebuilt binary from the [Releases page](https://github.com/iwamot/sub1/releases).
+
+Then tell the agent to use it, in `CLAUDE.md`, `AGENTS.md`, or whichever file your agent reads:
+
+```markdown
+To replace part of a file from the shell, use `sub1` instead of sed or an ad-hoc script: `sub1 FILE <<'SUB1'`, then the old lines, a line `====`, the new lines, and `SUB1`. It rewrites the file only when the old block occurs exactly once; on exit 1, read the reported count and either widen the old block or pass `-n N` for the number of occurrences you expect. If the text itself contains a `====` line, pass `-d` with another separator.
+```
+
+That paragraph is all the agent needs.
+
+## What the agent sees
+
+Renaming a function. The definition is unique, so the edit lands and the output is one line:
+
+```
+$ sub1 handlers.py <<'SUB1'
+def _tool_chunks(chunks):
+====
+def tool_chunks(chunks):
+SUB1
+handlers.py: replaced at line 12
+```
+
+The call sites are not unique. Nothing is written, and the count comes back:
+
+```
+$ sub1 handlers.py <<'SUB1'
+_tool_chunks(
+====
+tool_chunks(
+SUB1
+sub1: handlers.py: old block found 3 times, expected 1
+```
+
+The agent then either widens the old block until it is unique, or says how many occurrences it expects. The count is still checked, so a stray extra match would still stop the edit:
+
+```
+$ sub1 -n 3 handlers.py <<'SUB1'
+_tool_chunks(
+====
+tool_chunks(
+SUB1
+handlers.py: replaced at lines 27, 40, 41
+```
+
+## Reference
+
+```
+$ sub1 --help
+sub1 — replace a literal text block in a file, exactly once.
+
+Usage:
+  sub1 [-n N] [-d SEP] FILE <<'SUB1'
+  old text (one or more lines)
+  ====
+  new text (zero or more lines)
+  SUB1
+  sub1 -h, --help
+  sub1 -v, --version
+
+OLD and NEW come from stdin, split at the single line equal to SEP (default
+"===="). The final newline of each block is dropped. FILE is rewritten only
+when OLD occurs exactly N times (default 1); otherwise it is left untouched.
+
+Exit codes:
+  0  replaced
+  1  OLD found a different number of times than expected
+  2  usage error, or FILE could not be read or written
+```
+
+- Matching is byte-exact: tabs and spaces differ, and a CRLF file needs CRLF in the old block.
+- An empty new block deletes the old block. To remove a whole line including its line break, start the old block one line earlier and repeat that line in the new block.
+- If either block contains a line that is exactly `====` (a Markdown setext underline, for example), pass another separator with `-d`.
+- The file's permissions are kept. Only its contents change.
+
+## Out of scope
+
+- Regular expressions. The blocks are literal bytes.
+- Editing more than one file per call. Run `sub1` once per file.
+- Reading the text to edit from stdin. stdin carries the blocks; the file to edit is named on the command line and rewritten in place.
+- Ranges such as "from this line to that line". `sub1` only replaces text it was shown, so it never removes more than you wrote in the old block.
+
+## License
+
+MIT
