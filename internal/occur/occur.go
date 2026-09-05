@@ -55,64 +55,53 @@ func Mismatch(path string, lines []int, expected int) string {
 // old match in a row is reported. The hint is only a lead: the count in the
 // Mismatch line is what decided that nothing was replaced.
 func Hint(content, old []byte) string {
+	// CRLF line endings are folded away on the file side only, and stated
+	// first when present. A file with CRLF usually differs in something else
+	// as well, and the "\r" would otherwise hide a trailing-whitespace
+	// difference. The old block comes from a heredoc and has no "\r" to fold.
+	var notes []string
+	if bytes.Contains(content, crlf) {
+		content = bytes.ReplaceAll(content, crlf, newline)
+		notes = append(notes, "the file uses CRLF line endings")
+	}
 	for _, n := range normalizations {
 		lines := Lines(n.apply(content), n.apply(old))
 		if len(lines) == 0 {
 			continue
 		}
-		return fmt.Sprintf("near %s: %s", lineList(lines), n.describe(content, old, lines[0]))
+		if n.describe != nil {
+			notes = append(notes, n.describe(content, old, lines[0]))
+		}
+		return fmt.Sprintf("near %s: %s", lineList(lines), strings.Join(notes, "; "))
 	}
-	return prefixHint(content, old)
+	line, note := prefixHint(content, old)
+	if line == 0 {
+		return ""
+	}
+	return fmt.Sprintf("near line %d: %s", line, strings.Join(append(notes, note), "; "))
 }
 
 // A normalization erases one kind of whitespace difference. It must keep the
 // number of lines unchanged, so that a line number found in the normalized
 // content is valid in the original. describe explains, for the match that
 // starts at the given 1-based line of content, what the file has that old
-// does not, or the other way round.
+// does not, or the other way round. The first normalization is the identity,
+// which catches a file that differs in line endings alone.
 type normalization struct {
 	apply    func([]byte) []byte
 	describe func(content, old []byte, line int) string
 }
 
-// The whitespace normalizations are applied on top of the line-ending one,
-// since a file with CRLF line endings usually differs in something else as
-// well, and the "\r" would otherwise hide a trailing-whitespace difference.
 var normalizations = []normalization{
-	{lineEndings, describeLineEndings},
-	{trailingWhitespace, afterLineEndings(describeTrailingWhitespace)},
-	{leadingWhitespace, afterLineEndings(describeLeadingWhitespace)},
+	{func(b []byte) []byte { return b }, nil},
+	{trailingWhitespace, describeTrailingWhitespace},
+	{leadingWhitespace, describeLeadingWhitespace},
 }
 
 var crlf = []byte("\r\n")
 
-func lineEndings(b []byte) []byte {
-	return bytes.ReplaceAll(b, crlf, newline)
-}
-
-func describeLineEndings(content, _ []byte, _ int) string {
-	side := "file"
-	if !bytes.Contains(content, crlf) {
-		side = "old block"
-	}
-	return "the " + side + " uses CRLF line endings"
-}
-
-// afterLineEndings makes describe look at content and old with CRLF folded
-// away, as the normalization it explains did, and states the CRLF
-// difference first when there is one.
-func afterLineEndings(describe func(content, old []byte, line int) string) func(content, old []byte, line int) string {
-	return func(content, old []byte, line int) string {
-		s := describe(lineEndings(content), lineEndings(old), line)
-		if bytes.Contains(content, crlf) || bytes.Contains(old, crlf) {
-			return describeLineEndings(content, old, line) + "; " + s
-		}
-		return s
-	}
-}
-
 func trailingWhitespace(b []byte) []byte {
-	return mapLines(lineEndings(b), func(line []byte) []byte { return bytes.TrimRight(line, " \t") })
+	return mapLines(b, func(line []byte) []byte { return bytes.TrimRight(line, " \t") })
 }
 
 // describeTrailingWhitespace names the first line, in old and then in the
@@ -135,7 +124,7 @@ func hasTrailing(line []byte) bool {
 }
 
 func leadingWhitespace(b []byte) []byte {
-	return mapLines(lineEndings(b), func(line []byte) []byte { return bytes.TrimLeft(line, " \t") })
+	return mapLines(b, func(line []byte) []byte { return bytes.TrimLeft(line, " \t") })
 }
 
 // describeLeadingWhitespace compares the indentation of old and of the
@@ -190,14 +179,15 @@ func mapLines(b []byte, f func([]byte) []byte) []byte {
 }
 
 // prefixHint finds the place in content where the most leading lines of old
-// match in a row. A single matching line says nothing, since a brace or a
-// blank line matches anywhere, so at least two lines must match to report.
-// The run never reaches the last line of old: if it did, old as a whole
-// would occur in content.
-func prefixHint(content, old []byte) string {
+// match in a row, returning its 1-based line and a note, or 0 when there is
+// none. A single matching line says nothing, since a brace or a blank line
+// matches anywhere, so at least two lines must match to report. The run
+// never reaches the last line of old: if it did, old as a whole would occur
+// in content.
+func prefixHint(content, old []byte) (int, string) {
 	oldLines := bytes.Split(old, newline)
 	if len(oldLines) < 2 {
-		return ""
+		return 0, ""
 	}
 	fileLines := bytes.Split(content, newline)
 	first := append(append([]byte{}, oldLines[0]...), '\n')
@@ -219,9 +209,9 @@ func prefixHint(content, old []byte) string {
 		pos += len(first)
 	}
 	if best < 2 {
-		return ""
+		return 0, ""
 	}
-	return fmt.Sprintf("near line %d: first %d of %d lines match; line %d differs", bestLine, best, len(oldLines), best+1)
+	return bestLine, fmt.Sprintf("first %d of %d lines match; line %d differs", best, len(oldLines), best+1)
 }
 
 func lineList(lines []int) string {
