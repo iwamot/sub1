@@ -79,6 +79,8 @@ func TestHint(t *testing.T) {
 		{"prefix keeps the longest", "a\nb\nX\n\na\nb\nc\nX\n", "a\nb\nc\nd", "near line 5: first 3 of 4 lines match; line 4 differs"},
 		{"prefix keeps the earliest on a tie", "a\nb\nX\na\nb\nY\n", "a\nb\nc", "near line 1: first 2 of 3 lines match; line 3 differs"},
 		{"prefix line must match whole", "a\nb\ncd\n", "a\nb\nc\ne", "near line 1: first 2 of 4 lines match; line 3 differs"},
+		{"prefix first line must match whole too", "xfoo\nbar\nbaz\n", "foo\nbar\nqux", ""},
+		{"prefix first line ending a file line is skipped for a whole match", "xa\nb\nX\na\nb\nY\n", "a\nb\nc", "near line 4: first 2 of 3 lines match; line 3 differs"},
 		{"prefix stops at end of file", "a\nb", "a\nb\nc", "near line 1: first 2 of 3 lines match; line 3 differs"},
 		{"prefix in a CRLF file", "a\r\nb\r\nX\r\n", "a\nb\nc", "near line 1: the file uses CRLF line endings; first 2 of 3 lines match; line 3 differs"},
 		{"prefix of one line says nothing", "a\nx\n", "a\nb", ""},
