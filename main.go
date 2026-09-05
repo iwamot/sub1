@@ -29,7 +29,7 @@ const defaultSeparator = "===="
 const helpText = `sub1 — replace a literal text block in a file, exactly once.
 
 Usage:
-  sub1 [-n N] [-d SEP] FILE <<'SUB1'
+  sub1 [-n N] [-d SEP] [--] FILE <<'SUB1'
   old text (one or more lines)
   ====
   new text (zero or more lines)
@@ -70,6 +70,17 @@ func parseArgs(argv []string) (cliArgs, error) {
 	a := cliArgs{expected: 1, separator: defaultSeparator}
 	for i := 0; i < len(argv); i++ {
 		arg := argv[i]
+		if arg == "--" {
+			// Everything after "--" is a file name, even one that starts
+			// with "-".
+			for _, arg := range argv[i+1:] {
+				if a.path != "" {
+					return cliArgs{}, fmt.Errorf("multiple files given")
+				}
+				a.path = arg
+			}
+			break
+		}
 		switch arg {
 		case "-h", "--help":
 			a.showHelp = true
