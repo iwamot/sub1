@@ -186,33 +186,26 @@ func mapLines(b []byte, f func([]byte) []byte) []byte {
 
 // prefixHint finds the place in content where the most leading lines of old
 // match in a row, returning its 1-based line and a note, or 0 when there is
-// none. A single matching line says nothing, since a brace or a blank line
-// matches anywhere, so at least two lines must match to report. The run
-// never reaches the last line of old: if it did, old as a whole would occur
-// in content.
+// none. Lines are compared whole, the first one included: old's first line
+// ending a longer file line is not a match. A single matching line says
+// nothing, since a brace or a blank line matches anywhere, so at least two
+// lines must match to report. The run never reaches the last line of old: if
+// it did, old as a whole would occur in content.
 func prefixHint(content, old []byte) (int, string) {
 	oldLines := bytes.Split(old, newline)
 	if len(oldLines) < 2 {
 		return 0, ""
 	}
 	fileLines := bytes.Split(content, newline)
-	first := append(append([]byte{}, oldLines[0]...), '\n')
 	best, bestLine := 0, 0
-	for pos := 0; ; {
-		i := bytes.Index(content[pos:], first)
-		if i < 0 {
-			break
-		}
-		pos += i
-		line := bytes.Count(content[:pos], newline) + 1
-		m := 1
-		for m < len(oldLines) && line-1+m < len(fileLines) && bytes.Equal(fileLines[line-1+m], oldLines[m]) {
+	for i := range fileLines {
+		m := 0
+		for m < len(oldLines) && i+m < len(fileLines) && bytes.Equal(fileLines[i+m], oldLines[m]) {
 			m++
 		}
 		if m > best {
-			best, bestLine = m, line
+			best, bestLine = m, i+1
 		}
-		pos += len(first)
 	}
 	if best < 2 {
 		return 0, ""
