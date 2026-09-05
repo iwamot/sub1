@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/iwamot/sub1/internal/crlf"
 )
 
 var newline = []byte("\n")
@@ -59,10 +61,16 @@ func Hint(content, old []byte) string {
 	// first when present. A file with CRLF usually differs in something else
 	// as well, and the "\r" would otherwise hide a trailing-whitespace
 	// difference. The old block comes from a heredoc and has no "\r" to fold.
+	// The caller folds a file that is CRLF throughout before asking for a
+	// hint, so CRLF seen here normally means the file mixes line endings.
 	var notes []string
-	if bytes.Contains(content, crlf) {
-		content = bytes.ReplaceAll(content, crlf, newline)
-		notes = append(notes, "the file uses CRLF line endings")
+	if bytes.Contains(content, []byte("\r\n")) {
+		note := "the file has mixed line endings"
+		if crlf.Uniform(content) {
+			note = "the file uses CRLF line endings"
+		}
+		content = crlf.ToLF(content)
+		notes = append(notes, note)
 	}
 	for _, n := range normalizations {
 		lines := Lines(n.apply(content), n.apply(old))
@@ -97,8 +105,6 @@ var normalizations = []normalization{
 	{trailingWhitespace, describeTrailingWhitespace},
 	{leadingWhitespace, describeLeadingWhitespace},
 }
-
-var crlf = []byte("\r\n")
 
 func trailingWhitespace(b []byte) []byte {
 	return mapLines(b, func(line []byte) []byte { return bytes.TrimRight(line, " \t") })
