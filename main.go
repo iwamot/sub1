@@ -34,12 +34,17 @@ Usage:
   ====
   new text (zero or more lines)
   SUB1
-  sub1 -h, --help
-  sub1 -v, --version
 
-OLD and NEW come from stdin, split at the single line equal to SEP (default
-"===="). The final newline of each block is dropped. FILE is rewritten only
-when OLD occurs exactly N times (default 1); otherwise it is left untouched.
+OLD and NEW come from stdin, split at the single line equal to SEP. The final
+newline of each block is dropped. FILE is rewritten only when OLD occurs
+exactly N times; otherwise it is left untouched.
+
+Options:
+  -n N            expect OLD N times (default 1)
+  -d SEP          separator line between OLD and NEW (default "====")
+  -h, --help      show this help
+  -v, --version   show the version
+  --instructions  print the paragraph for the agent's instruction file
 
 Exit codes:
   0  replaced
@@ -47,12 +52,18 @@ Exit codes:
   2  usage error, or FILE could not be read or written
 `
 
+// instructionsText is the paragraph a coding agent needs in order to use
+// sub1: when to reach for it, how to write the heredoc, what to check before
+// writing it, and how to recover from exit 1. README.md quotes it verbatim.
+const instructionsText = "To replace part of a file from the shell, use `sub1` instead of sed or an ad-hoc script: `sub1 FILE <<'SUB1'`, then the old lines, a line `====`, the new lines, and `SUB1`. Before writing the heredoc, check both blocks: if a line is exactly `SUB1`, use another terminator; if a line is exactly `====`, pass `-d SEP` and write SEP on the separator line instead. The file is rewritten only when the old block occurs exactly once. On exit 1, read the reported count and lines. When the count is 0, a second line, if present, says how the old block differs from the file: fix the old block, or read the file again if there is no second line. Otherwise widen the old block until it is unique, or pass `-n N` for the number of occurrences you expect.\n"
+
 type cliArgs struct {
-	showHelp    bool
-	showVersion bool
-	expected    int
-	separator   string
-	path        string
+	showHelp         bool
+	showVersion      bool
+	showInstructions bool
+	expected         int
+	separator        string
+	path             string
 }
 
 func parseArgs(argv []string) (cliArgs, error) {
@@ -64,6 +75,8 @@ func parseArgs(argv []string) (cliArgs, error) {
 			a.showHelp = true
 		case "-v", "--version":
 			a.showVersion = true
+		case "--instructions":
+			a.showInstructions = true
 		case "-n", "-d":
 			if i+1 >= len(argv) {
 				return cliArgs{}, fmt.Errorf("%s needs a value", arg)
@@ -92,7 +105,7 @@ func parseArgs(argv []string) (cliArgs, error) {
 			a.path = arg
 		}
 	}
-	if a.path == "" && !a.showHelp && !a.showVersion {
+	if a.path == "" && !a.showHelp && !a.showVersion && !a.showInstructions {
 		return cliArgs{}, fmt.Errorf("no file given")
 	}
 	return a, nil
@@ -157,6 +170,10 @@ func run(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if a.showVersion {
 		info, _ := debug.ReadBuildInfo()
 		fmt.Fprintln(stdout, resolveVersion(version, info))
+		return exitOK
+	}
+	if a.showInstructions {
+		fmt.Fprint(stdout, instructionsText)
 		return exitOK
 	}
 

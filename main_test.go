@@ -28,6 +28,7 @@ func TestParseArgs(t *testing.T) {
 		{"help long", []string{"--help"}, with(func(a *cliArgs) { a.showHelp = true }), ""},
 		{"version short", []string{"-v"}, with(func(a *cliArgs) { a.showVersion = true }), ""},
 		{"version long", []string{"--version"}, with(func(a *cliArgs) { a.showVersion = true }), ""},
+		{"instructions", []string{"--instructions"}, with(func(a *cliArgs) { a.showInstructions = true }), ""},
 		{"no file", nil, cliArgs{}, "no file given"},
 		{"unknown flag", []string{"--bogus", "f.txt"}, cliArgs{}, "unknown flag"},
 		{"two files", []string{"a", "b"}, cliArgs{}, "multiple files"},
@@ -324,9 +325,22 @@ func TestRun_help(t *testing.T) {
 		if !strings.HasPrefix(r.stdout, "sub1 — ") || !strings.Contains(r.stdout, "Usage:") {
 			t.Errorf("%s: stdout = %q", flag, r.stdout)
 		}
-		if n := strings.Count(r.stdout, "\n"); n > 20 {
-			t.Errorf("%s: help is %d lines, want at most 20", flag, n)
+		if n := strings.Count(r.stdout, "\n"); n > 24 {
+			t.Errorf("%s: help is %d lines, want at most 24", flag, n)
 		}
+	}
+}
+
+func TestRun_instructions(t *testing.T) {
+	r := runWith([]string{"--instructions"}, "")
+	if r.code != exitOK || r.stderr != "" {
+		t.Errorf("exit = %d, stderr = %q", r.code, r.stderr)
+	}
+	if r.stdout != instructionsText {
+		t.Errorf("stdout = %q", r.stdout)
+	}
+	if strings.Count(r.stdout, "\n") != 1 || !strings.HasSuffix(r.stdout, "\n") {
+		t.Error("instructions must be a single paragraph ending in a newline")
 	}
 }
 

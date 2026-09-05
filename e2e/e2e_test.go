@@ -168,24 +168,40 @@ func TestE2E_emptyStdinIsNotATerminal(t *testing.T) {
 	}
 }
 
-// The README quotes --help verbatim; keep the two from drifting apart.
-func TestE2E_readmeQuotesHelp(t *testing.T) {
+// readmeBlock returns the body of the first fenced block in README.md that
+// opens with the given line.
+func readmeBlock(t *testing.T, opening string) string {
+	t.Helper()
 	readme, err := os.ReadFile(filepath.Join("..", "README.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	const marker = "```\n$ sub1 --help\n"
+	marker := opening + "\n"
 	start := strings.Index(string(readme), marker)
 	if start < 0 {
-		t.Fatalf("README.md has no %q block", marker)
+		t.Fatalf("README.md has no %q block", opening)
 	}
 	rest := string(readme)[start+len(marker):]
 	end := strings.Index(rest, "```")
 	if end < 0 {
-		t.Fatal("README.md help block is not closed")
+		t.Fatalf("README.md %q block is not closed", opening)
 	}
-	quoted := rest[:end]
+	return rest[:end]
+}
+
+// The README quotes --help verbatim; keep the two from drifting apart.
+func TestE2E_readmeQuotesHelp(t *testing.T) {
+	quoted := readmeBlock(t, "```\n$ sub1 --help")
 	if got := runBin(t, "", "--help").stdout; got != quoted {
 		t.Errorf("README help block differs from --help output\n--- README ---\n%s\n--- --help ---\n%s", quoted, got)
+	}
+}
+
+// The README quotes the agent instructions verbatim too, in the markdown
+// block that readers paste into their own instruction file.
+func TestE2E_readmeQuotesInstructions(t *testing.T) {
+	quoted := readmeBlock(t, "```markdown")
+	if got := runBin(t, "", "--instructions").stdout; got != quoted {
+		t.Errorf("README instructions block differs from --instructions output\n--- README ---\n%s\n--- --instructions ---\n%s", quoted, got)
 	}
 }

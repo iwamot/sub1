@@ -47,10 +47,10 @@ Or download a prebuilt binary from the [Releases page](https://github.com/iwamot
 Then tell the agent to use it, in `CLAUDE.md`, `AGENTS.md`, or whichever file your agent reads:
 
 ```markdown
-To replace part of a file from the shell, use `sub1` instead of sed or an ad-hoc script: `sub1 FILE <<'SUB1'`, then the old lines, a line `====`, the new lines, and `SUB1`. It rewrites the file only when the old block occurs exactly once; on exit 1, read the reported count and lines, then either fix the old block, widen it, or pass `-n N` for the number of occurrences you expect. If the text itself contains a `====` line, pass `-d` with another separator.
+To replace part of a file from the shell, use `sub1` instead of sed or an ad-hoc script: `sub1 FILE <<'SUB1'`, then the old lines, a line `====`, the new lines, and `SUB1`. Before writing the heredoc, check both blocks: if a line is exactly `SUB1`, use another terminator; if a line is exactly `====`, pass `-d SEP` and write SEP on the separator line instead. The file is rewritten only when the old block occurs exactly once. On exit 1, read the reported count and lines. When the count is 0, a second line, if present, says how the old block differs from the file: fix the old block, or read the file again if there is no second line. Otherwise widen the old block until it is unique, or pass `-n N` for the number of occurrences you expect.
 ```
 
-That paragraph is all the agent needs.
+That paragraph is all the agent needs. `sub1 --instructions` prints the same paragraph, for setup scripts and machines where this page is not at hand.
 
 ## What the agent sees
 
@@ -115,12 +115,17 @@ Usage:
   ====
   new text (zero or more lines)
   SUB1
-  sub1 -h, --help
-  sub1 -v, --version
 
-OLD and NEW come from stdin, split at the single line equal to SEP (default
-"===="). The final newline of each block is dropped. FILE is rewritten only
-when OLD occurs exactly N times (default 1); otherwise it is left untouched.
+OLD and NEW come from stdin, split at the single line equal to SEP. The final
+newline of each block is dropped. FILE is rewritten only when OLD occurs
+exactly N times; otherwise it is left untouched.
+
+Options:
+  -n N            expect OLD N times (default 1)
+  -d SEP          separator line between OLD and NEW (default "====")
+  -h, --help      show this help
+  -v, --version   show the version
+  --instructions  print the paragraph for the agent's instruction file
 
 Exit codes:
   0  replaced
