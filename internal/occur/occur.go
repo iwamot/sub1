@@ -104,6 +104,7 @@ var normalizations = []normalization{
 	{func(b []byte) []byte { return b }, nil},
 	{trailingWhitespace, describeTrailingWhitespace},
 	{leadingWhitespace, describeLeadingWhitespace},
+	{innerWhitespace, describeInnerWhitespace},
 }
 
 func trailingWhitespace(b []byte) []byte {
@@ -151,11 +152,17 @@ func indent(line []byte) []byte {
 }
 
 func describeIndent(ws []byte) string {
+	if len(ws) == 0 {
+		return "no indentation"
+	}
+	return describeRun(ws)
+}
+
+// describeRun names a non-empty run of spaces and tabs.
+func describeRun(ws []byte) string {
 	tabs := bytes.Count(ws, []byte("\t"))
 	spaces := len(ws) - tabs
 	switch {
-	case tabs == 0 && spaces == 0:
-		return "no indentation"
 	case tabs > 0 && spaces > 0:
 		return "mixed tabs and spaces"
 	case tabs > 0:
@@ -163,6 +170,74 @@ func describeIndent(ws []byte) string {
 	default:
 		return plural(spaces, "space")
 	}
+}
+
+// innerWhitespace collapses every run of spaces and tabs in a line into a
+// single space, wherever it is. It comes after the trailing and leading
+// normalizations, so a difference it alone erases lies inside a line, or is
+// spread over more than one of the three places.
+func innerWhitespace(b []byte) []byte {
+	return mapLines(b, func(line []byte) []byte {
+		out := make([]byte, 0, len(line))
+		for i := 0; i < len(line); {
+			if !isBlank(line[i]) {
+				out = append(out, line[i])
+				i++
+				continue
+			}
+			out = append(out, ' ')
+			for i < len(line) && isBlank(line[i]) {
+				i++
+			}
+		}
+		return out
+	})
+}
+
+// describeInnerWhitespace walks the first line of the matched region that
+// differs from old as written and reports the first run of whitespace whose
+// two versions disagree. The lines are equal once every run is collapsed to
+// one space, so the runs pair up one to one.
+func describeInnerWhitespace(content, old []byte, line int) string {
+	oldLines, fileLines := region(content, old, line)
+	i := 0
+	for i+1 < len(oldLines) && bytes.Equal(oldLines[i], fileLines[i]) {
+		i++
+	}
+	fileRun, oldRun := differingRuns(fileLines[i], oldLines[i])
+	return fmt.Sprintf("file line %d has %s where the old block has %s", line+i, describeRun(fileRun), describeRun(oldRun))
+}
+
+// differingRuns returns the first pair of whitespace runs, at the same place
+// in a and b, that are not the same bytes. a and b must be equal once their
+// runs are collapsed, and must not be identical.
+func differingRuns(a, b []byte) (runA, runB []byte) {
+	i, j := 0, 0
+	for {
+		if isBlank(a[i]) {
+			ra, rb := blankRun(a[i:]), blankRun(b[j:])
+			if !bytes.Equal(ra, rb) {
+				return ra, rb
+			}
+			i, j = i+len(ra), j+len(rb)
+			continue
+		}
+		i++
+		j++
+	}
+}
+
+// blankRun returns the run of spaces and tabs that b starts with.
+func blankRun(b []byte) []byte {
+	n := 0
+	for n < len(b) && isBlank(b[n]) {
+		n++
+	}
+	return b[:n]
+}
+
+func isBlank(c byte) bool {
+	return c == ' ' || c == '\t'
 }
 
 // region returns the lines of old and the same number of lines of content
