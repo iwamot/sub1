@@ -182,7 +182,12 @@ func run(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 	lines := occur.Lines(content, blocks.Old)
 	if len(lines) != a.expected {
-		fmt.Fprintf(stderr, "sub1: %s: old block found %d times, expected %d\n", a.path, len(lines), a.expected)
+		fmt.Fprintln(stderr, "sub1:", occur.Mismatch(a.path, lines, a.expected))
+		if len(lines) == 0 {
+			if hint := occur.Hint(content, blocks.Old); hint != "" {
+				fmt.Fprintf(stderr, "  %s\n", hint)
+			}
+		}
 		return exitMismatch
 	}
 	if err := atomicfile.WriteFile(a.path, bytes.ReplaceAll(content, blocks.Old, blocks.New)); err != nil {
