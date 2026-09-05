@@ -75,26 +75,44 @@ type normalization struct {
 	describe func(content, old []byte, line int) string
 }
 
+// The whitespace normalizations are applied on top of the line-ending one,
+// since a file with CRLF line endings usually differs in something else as
+// well, and the "\r" would otherwise hide a trailing-whitespace difference.
 var normalizations = []normalization{
 	{lineEndings, describeLineEndings},
-	{trailingWhitespace, describeTrailingWhitespace},
-	{leadingWhitespace, describeLeadingWhitespace},
+	{trailingWhitespace, afterLineEndings(describeTrailingWhitespace)},
+	{leadingWhitespace, afterLineEndings(describeLeadingWhitespace)},
 }
 
+var crlf = []byte("\r\n")
+
 func lineEndings(b []byte) []byte {
-	return bytes.ReplaceAll(b, []byte("\r\n"), newline)
+	return bytes.ReplaceAll(b, crlf, newline)
 }
 
 func describeLineEndings(content, _ []byte, _ int) string {
 	side := "file"
-	if !bytes.Contains(content, []byte("\r\n")) {
+	if !bytes.Contains(content, crlf) {
 		side = "old block"
 	}
 	return "the " + side + " uses CRLF line endings"
 }
 
+// afterLineEndings makes describe look at content and old with CRLF folded
+// away, as the normalization it explains did, and states the CRLF
+// difference first when there is one.
+func afterLineEndings(describe func(content, old []byte, line int) string) func(content, old []byte, line int) string {
+	return func(content, old []byte, line int) string {
+		s := describe(lineEndings(content), lineEndings(old), line)
+		if bytes.Contains(content, crlf) || bytes.Contains(old, crlf) {
+			return describeLineEndings(content, old, line) + "; " + s
+		}
+		return s
+	}
+}
+
 func trailingWhitespace(b []byte) []byte {
-	return mapLines(b, func(line []byte) []byte { return bytes.TrimRight(line, " \t") })
+	return mapLines(lineEndings(b), func(line []byte) []byte { return bytes.TrimRight(line, " \t") })
 }
 
 // describeTrailingWhitespace names the first line, in old and then in the
@@ -117,7 +135,7 @@ func hasTrailing(line []byte) bool {
 }
 
 func leadingWhitespace(b []byte) []byte {
-	return mapLines(b, func(line []byte) []byte { return bytes.TrimLeft(line, " \t") })
+	return mapLines(lineEndings(b), func(line []byte) []byte { return bytes.TrimLeft(line, " \t") })
 }
 
 // describeLeadingWhitespace compares the indentation of old and of the
