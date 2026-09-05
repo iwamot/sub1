@@ -11,6 +11,7 @@ import (
 
 	"github.com/iwamot/sub1/internal/atomicfile"
 	"github.com/iwamot/sub1/internal/block"
+	"github.com/iwamot/sub1/internal/crlf"
 	"github.com/iwamot/sub1/internal/occur"
 )
 
@@ -208,20 +209,37 @@ func run(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "sub1:", err)
 		return exitUsage
 	}
-	lines := occur.Lines(content, blocks.Old)
+	// The blocks come from a heredoc and end their lines with LF. A file
+	// that ends every line with CRLF is edited as CRLF: both blocks are
+	// converted before matching, and the hint, if one is needed, compares
+	// the LF forms so that line endings do not drown out the real difference.
+	old, new := blocks.Old, blocks.New
+	asCRLF := crlf.Uniform(content) && !bytes.ContainsRune(old, '\r') && !bytes.ContainsRune(new, '\r')
+	if asCRLF {
+		old, new = crlf.ToCRLF(old), crlf.ToCRLF(new)
+	}
+	lines := occur.Lines(content, old)
 	if len(lines) != a.expected {
 		fmt.Fprintln(stderr, "sub1:", occur.Mismatch(a.path, lines, a.expected))
 		if len(lines) == 0 {
-			if hint := occur.Hint(content, blocks.Old); hint != "" {
+			hintContent := content
+			if asCRLF {
+				hintContent = crlf.ToLF(content)
+			}
+			if hint := occur.Hint(hintContent, blocks.Old); hint != "" {
 				fmt.Fprintf(stderr, "  %s\n", hint)
 			}
 		}
 		return exitMismatch
 	}
-	if err := atomicfile.WriteFile(a.path, bytes.ReplaceAll(content, blocks.Old, blocks.New)); err != nil {
+	if err := atomicfile.WriteFile(a.path, bytes.ReplaceAll(content, old, new)); err != nil {
 		fmt.Fprintln(stderr, "sub1:", err)
 		return exitUsage
 	}
-	fmt.Fprintln(stdout, occur.Summary(a.path, lines))
+	summary := occur.Summary(a.path, lines)
+	if asCRLF {
+		summary += " (CRLF)"
+	}
+	fmt.Fprintln(stdout, summary)
 	return exitOK
 }

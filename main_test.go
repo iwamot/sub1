@@ -230,6 +230,94 @@ func TestRun_absentBlockGetsHint(t *testing.T) {
 	}
 }
 
+func TestRun_crlfFileIsEditedAsCRLF(t *testing.T) {
+	tests := []struct {
+		name  string
+		file  string
+		stdin string
+		want  string
+	}{
+		{"multi-line blocks", "one\r\ntwo\r\nthree\r\n", "two\nthree\n====\ntwo\nfour\n", "one\r\ntwo\r\nfour\r\n"},
+		{"one-line old, multi-line new", "one\r\ntwo\r\nthree\r\n", "two\n====\ntwo\ntwo-and-a-half\n", "one\r\ntwo\r\ntwo-and-a-half\r\nthree\r\n"},
+		{"no final line break", "one\r\ntwo", "two\n====\n2\n", "one\r\n2"},
+		{"deletion keeps the line breaks it was shown", "a\r\nb\r\nc\r\n", "a\nb\n====\na\n", "a\r\nc\r\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeTemp(t, tt.file)
+			r := runWith([]string{path}, tt.stdin)
+			if r.code != exitOK || r.stderr != "" {
+				t.Fatalf("exit = %d, stderr = %q", r.code, r.stderr)
+			}
+			if !strings.HasSuffix(r.stdout, " (CRLF)\n") {
+				t.Errorf("stdout = %q, want it to end with (CRLF)", r.stdout)
+			}
+			if got := readBack(t, path); got != tt.want {
+				t.Errorf("file = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRun_crlfFileHintIgnoresLineEndings(t *testing.T) {
+	path := writeTemp(t, "a\r\n\tb\r\n")
+	r := runWith([]string{path}, "a\n  b\n====\nc\n")
+	if r.code != exitMismatch {
+		t.Fatalf("exit = %d, want 1 (stderr: %q)", r.code, r.stderr)
+	}
+	want := "sub1: " + path + ": old block found 0 times, expected 1\n" +
+		"  near line 1: file line 2 starts with 1 tab, old block line 2 with 2 spaces\n"
+	if r.stderr != want {
+		t.Errorf("stderr = %q, want %q", r.stderr, want)
+	}
+}
+
+func TestRun_mixedLineEndingsAreMatchedAsIs(t *testing.T) {
+	original := "a\r\nb\nc\r\n"
+	path := writeTemp(t, original)
+	r := runWith([]string{path}, "a\nb\nc\n====\nx\n")
+	if r.code != exitMismatch {
+		t.Fatalf("exit = %d, want 1 (stderr: %q)", r.code, r.stderr)
+	}
+	want := "sub1: " + path + ": old block found 0 times, expected 1\n" +
+		"  near line 1: the file has mixed line endings\n"
+	if r.stderr != want {
+		t.Errorf("stderr = %q, want %q", r.stderr, want)
+	}
+	if got := readBack(t, path); got != original {
+		t.Errorf("file changed to %q", got)
+	}
+}
+
+func TestRun_fileWithoutLineBreakStaysLF(t *testing.T) {
+	path := writeTemp(t, "abc")
+	r := runWith([]string{path}, "b\n====\nx\ny\n")
+	if r.code != exitOK || r.stderr != "" {
+		t.Fatalf("exit = %d, stderr = %q", r.code, r.stderr)
+	}
+	if want := path + ": replaced at line 1\n"; r.stdout != want {
+		t.Errorf("stdout = %q, want %q", r.stdout, want)
+	}
+	if got := readBack(t, path); got != "ax\nyc" {
+		t.Errorf("file = %q, want %q", got, "ax\nyc")
+	}
+}
+
+func TestRun_blocksWithCRAreTakenLiterally(t *testing.T) {
+	original := "a\r\nb\r\n"
+	path := writeTemp(t, original)
+	r := runWith([]string{path}, "a\r\nb\n====\nA\r\nB\n")
+	if r.code != exitOK || r.stderr != "" {
+		t.Fatalf("exit = %d, stderr = %q", r.code, r.stderr)
+	}
+	if want := path + ": replaced at line 1\n"; r.stdout != want {
+		t.Errorf("stdout = %q, want %q", r.stdout, want)
+	}
+	if got := readBack(t, path); got != "A\r\nB\r\n" {
+		t.Errorf("file = %q", got)
+	}
+}
+
 func TestRun_countMatchesReplacesAll(t *testing.T) {
 	path := writeTemp(t, "x(1)\ny\nx(2)\nx(3)\n")
 	r := runWith([]string{"-n", "3", path}, "x(\n====\nz(\n")

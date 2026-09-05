@@ -133,7 +133,7 @@ Exit codes:
   2  usage error, or FILE could not be read or written
 ```
 
-- Matching is byte-exact: tabs and spaces differ, and a CRLF file needs CRLF in the old block.
+- Matching is byte-exact: tabs and spaces differ. Line endings are the one exception: when every line of the file ends with CRLF, both blocks are read as CRLF too, so a heredoc can edit such a file, and the summary ends with `(CRLF)`. A file that mixes CRLF and LF is matched as is.
 - An empty new block deletes the old block. To remove a whole line including its line break, start the old block one line earlier and repeat that line in the new block.
 - If either block contains a line that is exactly `====` (a Markdown setext underline, for example), pass another separator with `-d`.
 - The file's permissions are kept. Only its contents change.

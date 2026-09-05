@@ -61,6 +61,8 @@ func TestHint(t *testing.T) {
 	}{
 		{"nothing close", "a\nb\n", "z", ""},
 		{"file uses CRLF", "a\r\nb\r\n", "a\nb", "near line 1: the file uses CRLF line endings"},
+		{"file mixes CRLF and LF", "a\r\nb\nc\r\n", "a\nb\nc", "near line 1: the file has mixed line endings"},
+		{"mixed line endings and tabs", "x\n\tfoo\r\n\tbar\n", "  foo\n  bar", "near line 2: the file has mixed line endings; file line 2 starts with 1 tab, old block line 1 with 2 spaces"},
 		{"old block CRLF gets no hint", "a\nb\n", "a\r\nb", ""},
 		{"file has trailing whitespace", "x\na \nb\n", "a\nb", "near line 2: file line 2 has trailing whitespace"},
 		{"old block has trailing whitespace", "x\na\nb\n", "a\nb\t", "near line 2: old block line 2 has trailing whitespace"},
