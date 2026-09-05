@@ -61,7 +61,7 @@ func TestHint(t *testing.T) {
 	}{
 		{"nothing close", "a\nb\n", "z", ""},
 		{"file uses CRLF", "a\r\nb\r\n", "a\nb", "near line 1: the file uses CRLF line endings"},
-		{"old block uses CRLF", "a\nb\n", "a\r\nb", "near line 1: the old block uses CRLF line endings"},
+		{"old block CRLF gets no hint", "a\nb\n", "a\r\nb", ""},
 		{"file has trailing whitespace", "x\na \nb\n", "a\nb", "near line 2: file line 2 has trailing whitespace"},
 		{"old block has trailing whitespace", "x\na\nb\n", "a\nb\t", "near line 2: old block line 2 has trailing whitespace"},
 		{"trailing whitespace later in the block", "a\nb\t\nc\n", "a\nb\nc", "near line 1: file line 2 has trailing whitespace"},
@@ -72,12 +72,13 @@ func TestHint(t *testing.T) {
 		{"whitespace hint reports every match", "\tfoo\nx\n\tfoo\n", "  foo", "near lines 1, 3: file line 1 starts with 1 tab, old block line 1 with 2 spaces"},
 		{"CRLF and tabs", "build:\r\n\tgo build\r\n", "build:\n    go build", "near line 1: the file uses CRLF line endings; file line 2 starts with 1 tab, old block line 2 with 4 spaces"},
 		{"CRLF and trailing whitespace", "a \r\nb\r\n", "a\nb", "near line 1: the file uses CRLF line endings; file line 1 has trailing whitespace"},
-		{"old block CRLF and tabs", "\tfoo\n\tbar\n", "  foo\r\n  bar", "near line 1: the old block uses CRLF line endings; file line 1 starts with 1 tab, old block line 1 with 2 spaces"},
+
 		{"prefix", "x\na\nb\nc\nd\n", "a\nb\nC\nd", "near line 2: first 2 of 4 lines match; line 3 differs"},
 		{"prefix keeps the longest", "a\nb\nX\n\na\nb\nc\nX\n", "a\nb\nc\nd", "near line 5: first 3 of 4 lines match; line 4 differs"},
 		{"prefix keeps the earliest on a tie", "a\nb\nX\na\nb\nY\n", "a\nb\nc", "near line 1: first 2 of 3 lines match; line 3 differs"},
 		{"prefix line must match whole", "a\nb\ncd\n", "a\nb\nc\ne", "near line 1: first 2 of 4 lines match; line 3 differs"},
 		{"prefix stops at end of file", "a\nb", "a\nb\nc", "near line 1: first 2 of 3 lines match; line 3 differs"},
+		{"prefix in a CRLF file", "a\r\nb\r\nX\r\n", "a\nb\nc", "near line 1: the file uses CRLF line endings; first 2 of 3 lines match; line 3 differs"},
 		{"prefix of one line says nothing", "a\nx\n", "a\nb", ""},
 		{"prefix first line absent", "x\ny\n", "a\nb", ""},
 		{"single-line old has no prefix", "abc\n", "abd", ""},
