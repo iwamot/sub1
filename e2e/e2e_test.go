@@ -118,7 +118,7 @@ func TestE2E_mismatchLeavesFileUntouched(t *testing.T) {
 	if r.exitCode != 1 {
 		t.Fatalf("exit = %d, want 1 (stderr: %q)", r.exitCode, r.stderr)
 	}
-	if r.stdout != "" || !strings.Contains(r.stderr, "found 2 times, expected 1") {
+	if r.stdout != "" || !strings.Contains(r.stderr, "found 2 times (lines 1, 2), expected 1") {
 		t.Errorf("stdout = %q, stderr = %q", r.stdout, r.stderr)
 	}
 	got, err := os.ReadFile(path)

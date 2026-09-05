@@ -167,9 +167,9 @@ func TestRun_countMismatchLeavesFileUntouched(t *testing.T) {
 		argv     []string
 		wantLine string
 	}{
-		{"absent", nil, "old block found 0 times, expected 1"},
-		{"duplicate", nil, "old block found 2 times, expected 1"},
-		{"fewer than -n", []string{"-n", "3"}, "old block found 2 times, expected 3"},
+		{"absent", nil, "old block found 0 times, expected 1\n"},
+		{"duplicate", nil, "old block found 2 times (lines 1, 2), expected 1\n"},
+		{"fewer than -n", []string{"-n", "3"}, "old block found 2 times (lines 1, 2), expected 3\n"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -186,13 +186,26 @@ func TestRun_countMismatchLeavesFileUntouched(t *testing.T) {
 			if r.stdout != "" {
 				t.Errorf("stdout = %q, want empty", r.stdout)
 			}
-			if !strings.Contains(r.stderr, tt.wantLine) {
-				t.Errorf("stderr = %q, want containing %q", r.stderr, tt.wantLine)
+			if want := "sub1: " + path + ": " + tt.wantLine; r.stderr != want {
+				t.Errorf("stderr = %q, want %q", r.stderr, want)
 			}
 			if got := readBack(t, path); got != original {
 				t.Errorf("file changed to %q", got)
 			}
 		})
+	}
+}
+
+func TestRun_absentBlockGetsHint(t *testing.T) {
+	path := writeTemp(t, "a\n\tb\n")
+	r := runWith([]string{path}, "a\n  b\n====\nc\n")
+	if r.code != exitMismatch {
+		t.Fatalf("exit = %d, want 1 (stderr: %q)", r.code, r.stderr)
+	}
+	want := "sub1: " + path + ": old block found 0 times, expected 1\n" +
+		"  near line 1: file line 2 starts with 1 tab, old block line 2 with 2 spaces\n"
+	if r.stderr != want {
+		t.Errorf("stderr = %q, want %q", r.stderr, want)
 	}
 }
 

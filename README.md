@@ -47,7 +47,7 @@ Or download a prebuilt binary from the [Releases page](https://github.com/iwamot
 Then tell the agent to use it, in `CLAUDE.md`, `AGENTS.md`, or whichever file your agent reads:
 
 ```markdown
-To replace part of a file from the shell, use `sub1` instead of sed or an ad-hoc script: `sub1 FILE <<'SUB1'`, then the old lines, a line `====`, the new lines, and `SUB1`. It rewrites the file only when the old block occurs exactly once; on exit 1, read the reported count and either widen the old block or pass `-n N` for the number of occurrences you expect. If the text itself contains a `====` line, pass `-d` with another separator.
+To replace part of a file from the shell, use `sub1` instead of sed or an ad-hoc script: `sub1 FILE <<'SUB1'`, then the old lines, a line `====`, the new lines, and `SUB1`. It rewrites the file only when the old block occurs exactly once; on exit 1, read the reported count and lines, then either fix the old block, widen it, or pass `-n N` for the number of occurrences you expect. If the text itself contains a `====` line, pass `-d` with another separator.
 ```
 
 That paragraph is all the agent needs.
@@ -65,7 +65,7 @@ SUB1
 handlers.py: replaced at line 12
 ```
 
-The call sites are not unique. Nothing is written, and the count comes back:
+The call sites are not unique. Nothing is written, and the count comes back with the lines:
 
 ```
 $ sub1 handlers.py <<'SUB1'
@@ -73,7 +73,7 @@ _tool_chunks(
 ====
 tool_chunks(
 SUB1
-sub1: handlers.py: old block found 3 times, expected 1
+sub1: handlers.py: old block found 3 times (lines 27, 40, 41), expected 1
 ```
 
 The agent then either widens the old block until it is unique, or says how many occurrences it expects. The count is still checked, so a stray extra match would still stop the edit:
@@ -86,6 +86,22 @@ tool_chunks(
 SUB1
 handlers.py: replaced at lines 27, 40, 41
 ```
+
+The old block was typed with spaces, but the file is indented with tabs. Nothing matches, and the closest place is described so that the old block can be fixed without reading the file again:
+
+```
+$ sub1 Makefile <<'SUB1'
+build:
+    go build ./...
+====
+build:
+    go build -trimpath ./...
+SUB1
+sub1: Makefile: old block found 0 times, expected 1
+  near line 3: file line 4 starts with 1 tab, old block line 2 with 4 spaces
+```
+
+The second line is a guess at what went wrong. The count on the first line is what decided that nothing was replaced.
 
 ## Reference
 
