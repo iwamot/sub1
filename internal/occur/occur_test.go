@@ -72,6 +72,13 @@ func TestHint(t *testing.T) {
 		{"mixed and none", "\t  foo\n  bar\n", "foo\nbar", "near line 1: file line 1 starts with mixed tabs and spaces, old block line 1 with no indentation"},
 		{"several tabs", "\t\tfoo\n\t\tbar\n", "\tfoo\n\tbar", "near line 1: file line 1 starts with 2 tabs, old block line 1 with 1 tab"},
 		{"whitespace hint reports every match", "\tfoo\nx\n\tfoo\n", "  foo", "near lines 1, 3: file line 1 starts with 1 tab, old block line 1 with 2 spaces"},
+		{"inner spaces", "a  b\nc\n", "a b\nc", "near line 1: file line 1 has 2 spaces where the old block has 1 space"},
+		{"inner tab versus space", "x\na\tb\n", "a b", "near line 2: file line 2 has 1 tab where the old block has 1 space"},
+		{"inner difference later in the block", "x\na b\n", "x\na  b", "near line 1: file line 2 has 1 space where the old block has 2 spaces"},
+		{"inner difference after an equal run", "a b  c\n", "a b c", "near line 1: file line 1 has 2 spaces where the old block has 1 space"},
+		{"inner mixed run", "a \t b\n", "a b", "near line 1: file line 1 has mixed tabs and spaces where the old block has 1 space"},
+		{"leading and inner together", "\ta  b\n", "  a b", "near line 1: file line 1 has 1 tab where the old block has 2 spaces"},
+		{"inner whitespace cannot be absent on one side", "a b\n", "ab", ""},
 		{"CRLF and tabs", "build:\r\n\tgo build\r\n", "build:\n    go build", "near line 1: the file uses CRLF line endings; file line 2 starts with 1 tab, old block line 2 with 4 spaces"},
 		{"CRLF and trailing whitespace", "a \r\nb\r\n", "a\nb", "near line 1: the file uses CRLF line endings; file line 1 has trailing whitespace"},
 
