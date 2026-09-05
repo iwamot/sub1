@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/iwamot/sub1/internal/atomicfile"
 	"github.com/iwamot/sub1/internal/block"
 	"github.com/iwamot/sub1/internal/occur"
 )
@@ -174,9 +175,7 @@ func run(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "sub1: %s: old block found %d times, expected %d\n", a.path, len(lines), a.expected)
 		return exitMismatch
 	}
-	// WriteFile keeps the mode of an existing file; 0o644 only applies on create,
-	// which cannot happen here because the file was just read.
-	if err := os.WriteFile(a.path, bytes.ReplaceAll(content, blocks.Old, blocks.New), 0o644); err != nil {
+	if err := atomicfile.WriteFile(a.path, bytes.ReplaceAll(content, blocks.Old, blocks.New)); err != nil {
 		fmt.Fprintln(stderr, "sub1:", err)
 		return exitUsage
 	}

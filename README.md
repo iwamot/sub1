@@ -116,6 +116,8 @@ Exit codes:
 - An empty new block deletes the old block. To remove a whole line including its line break, start the old block one line earlier and repeat that line in the new block.
 - If either block contains a line that is exactly `====` (a Markdown setext underline, for example), pass another separator with `-d`.
 - The file's permissions are kept. Only its contents change.
+- The file is never left half-written. The new contents go to a temporary `.sub1-*` file next to it, which is then renamed into place. If `sub1` is interrupted, the file still has either the old or the new contents, and any leftover `.sub1-*` file can be deleted.
+- Because of that rename, the directory must be writable, and hard links to the file are not preserved.
 
 ## Out of scope
 
