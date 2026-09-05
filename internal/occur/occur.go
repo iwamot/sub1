@@ -53,9 +53,10 @@ func Mismatch(path string, lines []int, expected int) string {
 // The guess is made in two steps. First, content and old are compared with
 // one kind of whitespace difference ignored at a time, and the first kind
 // that makes them match is reported along with what the file actually has.
-// Second, for a multi-line block, the place where the most leading lines of
-// old match in a row is reported. The hint is only a lead: the count in the
-// Mismatch line is what decided that nothing was replaced.
+// Second, for a multi-line block, the longest run of its lines that appears
+// in a row in the file is reported, along with the line next to that run
+// that must differ. The hint is only a lead: the count in the Mismatch line
+// is what decided that nothing was replaced.
 func Hint(content, old []byte) string {
 	// CRLF line endings are folded away on the file side only, and stated
 	// first when present. A file with CRLF usually differs in something else
@@ -82,7 +83,7 @@ func Hint(content, old []byte) string {
 		}
 		return fmt.Sprintf("near %s: %s", lineList(lines), strings.Join(notes, "; "))
 	}
-	line, note := prefixHint(content, old)
+	line, note := runHint(content, old)
 	if line == 0 {
 		return ""
 	}
@@ -259,33 +260,58 @@ func mapLines(b []byte, f func([]byte) []byte) []byte {
 	return bytes.Join(lines, newline)
 }
 
-// prefixHint finds the place in content where the most leading lines of old
-// match in a row, returning its 1-based line and a note, or 0 when there is
-// none. Lines are compared whole, the first one included: old's first line
-// ending a longer file line is not a match. A single matching line says
-// nothing, since a brace or a blank line matches anywhere, so at least two
-// lines must match to report. The run never reaches the last line of old: if
-// it did, old as a whole would occur in content.
-func prefixHint(content, old []byte) (int, string) {
+// runHint finds the longest run of consecutive lines of old that appears,
+// whole and in order, in content, at any offset into old. It returns the
+// 1-based file line where the run starts and a note naming the lines of old
+// it covers and the line next to it that must differ, or 0 when there is no
+// run to report. Lines are compared whole: a line of old ending a longer
+// file line is not a match. A single matching line says nothing, since a
+// brace or a blank line matches anywhere, so at least two lines must match.
+// The run never covers all of old: if it did, old as a whole would occur in
+// content. On a tie the earliest place in the file wins, and within it the
+// earliest place in old.
+func runHint(content, old []byte) (int, string) {
 	oldLines := bytes.Split(old, newline)
 	if len(oldLines) < 2 {
 		return 0, ""
 	}
 	fileLines := bytes.Split(content, newline)
-	best, bestLine := 0, 0
-	for i := range fileLines {
-		m := 0
-		for m < len(oldLines) && i+m < len(fileLines) && bytes.Equal(fileLines[i+m], oldLines[m]) {
-			m++
-		}
-		if m > best {
-			best, bestLine = m, i+1
+	best, bestFile, bestOld := 0, 0, 0
+	for j := range fileLines {
+		for i := range oldLines {
+			if j > 0 && i > 0 && bytes.Equal(fileLines[j-1], oldLines[i-1]) {
+				continue // inside a run already counted from where it starts
+			}
+			m := 0
+			for i+m < len(oldLines) && j+m < len(fileLines) && bytes.Equal(fileLines[j+m], oldLines[i+m]) {
+				m++
+			}
+			if m > best {
+				best, bestFile, bestOld = m, j, i
+			}
 		}
 	}
 	if best < 2 {
 		return 0, ""
 	}
-	return bestLine, fmt.Sprintf("first %d of %d lines match; line %d differs", best, len(oldLines), best+1)
+	var differs []int
+	if bestOld > 0 {
+		differs = append(differs, bestOld)
+	}
+	if bestOld+best < len(oldLines) {
+		differs = append(differs, bestOld+best+1)
+	}
+	return bestFile + 1, fmt.Sprintf("lines %d-%d of the old block match file lines %d-%d; %s",
+		bestOld+1, bestOld+best, bestFile+1, bestFile+best, differLines(differs))
+}
+
+// differLines words the lines of old, next to the matched run, that are
+// known not to match: one before it, one after it, or both.
+func differLines(lines []int) string {
+	if len(lines) == 1 {
+		return fmt.Sprintf("line %d differs", lines[0])
+	}
+	return fmt.Sprintf("lines %d and %d differ", lines[0], lines[1])
 }
 
 func lineList(lines []int) string {
