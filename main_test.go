@@ -284,6 +284,14 @@ func TestIsTerminal(t *testing.T) {
 	if isTerminal(f) {
 		t.Error("a regular file is not a terminal")
 	}
+	null, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer null.Close()
+	if isTerminal(null) {
+		t.Error("the null device is not a terminal")
+	}
 	tty, err := os.Open("/dev/tty")
 	if err != nil {
 		t.Skip("no controlling terminal")
