@@ -45,6 +45,11 @@ func runBin(t *testing.T, stdin string, args ...string) result {
 	t.Helper()
 	cmd := exec.Command(binPath, args...)
 	cmd.Stdin = strings.NewReader(stdin)
+	return runCmd(t, cmd)
+}
+
+func runCmd(t *testing.T, cmd *exec.Cmd) result {
+	t.Helper()
 	var so, se bytes.Buffer
 	cmd.Stdout = &so
 	cmd.Stderr = &se
@@ -56,7 +61,7 @@ func runBin(t *testing.T, stdin string, args ...string) result {
 	if errors.As(err, &ee) {
 		return result{stdout: so.String(), stderr: se.String(), exitCode: ee.ExitCode()}
 	}
-	t.Fatalf("run %v: %v", args, err)
+	t.Fatalf("run %v: %v", cmd.Args, err)
 	return result{}
 }
 
@@ -140,6 +145,26 @@ func TestE2E_usageError(t *testing.T) {
 	r := runBin(t, "", "--bogus")
 	if r.exitCode != 2 || r.stdout != "" || r.stderr == "" {
 		t.Errorf("exit = %d, stdout = %q, stderr = %q", r.exitCode, r.stdout, r.stderr)
+	}
+}
+
+// stdin on the null device, or closed and reopened there by the Go runtime,
+// is what sandboxes and CI hand to a process. It is not a terminal, so the
+// empty input reaches the block parser and is reported as such.
+func TestE2E_emptyStdinIsNotATerminal(t *testing.T) {
+	path := tempFile(t, "x\n")
+	devNull := exec.Command(binPath, path)
+	closed := exec.Command("bash", "-c", `exec "$0" "$1" <&-`, binPath, path)
+	for name, cmd := range map[string]*exec.Cmd{"null device": devNull, "closed": closed} {
+		t.Run(name, func(t *testing.T) {
+			r := runCmd(t, cmd)
+			if r.exitCode != 2 || r.stdout != "" {
+				t.Errorf("exit = %d, stdout = %q", r.exitCode, r.stdout)
+			}
+			if !strings.Contains(r.stderr, "found 0") || strings.Contains(r.stderr, "terminal") {
+				t.Errorf("stderr = %q, want the separator count, not the terminal message", r.stderr)
+			}
+		})
 	}
 }
 

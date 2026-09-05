@@ -121,13 +121,23 @@ func resolveVersion(injected string, info *debug.BuildInfo) string {
 
 // isTerminal reports whether r is an interactive terminal, where waiting for
 // a heredoc that will never come would look like a hang.
+//
+// The null device is a character device too, but reading it returns at once,
+// so it is excluded. That also covers a closed stdin, which the Go runtime
+// reopens on the null device at startup.
 func isTerminal(r io.Reader) bool {
 	f, ok := r.(*os.File)
 	if !ok {
 		return false
 	}
 	info, err := f.Stat()
-	return err == nil && info.Mode()&os.ModeCharDevice != 0
+	if err != nil {
+		return false
+	}
+	if null, err := os.Stat(os.DevNull); err == nil && os.SameFile(info, null) {
+		return false
+	}
+	return info.Mode()&os.ModeCharDevice != 0
 }
 
 func main() {
