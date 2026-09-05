@@ -110,7 +110,7 @@ $ sub1 --help
 sub1 — replace a literal text block in a file, exactly once.
 
 Usage:
-  sub1 [-n N] [-d SEP] FILE <<'SUB1'
+  sub1 [-n N] [-d SEP] [--] FILE <<'SUB1'
   old text (one or more lines)
   ====
   new text (zero or more lines)

@@ -29,6 +29,12 @@ func TestParseArgs(t *testing.T) {
 		{"version short", []string{"-v"}, with(func(a *cliArgs) { a.showVersion = true }), ""},
 		{"version long", []string{"--version"}, with(func(a *cliArgs) { a.showVersion = true }), ""},
 		{"instructions", []string{"--instructions"}, with(func(a *cliArgs) { a.showInstructions = true }), ""},
+		{"dash-dash before file", []string{"-n", "2", "--", "-f.txt"}, with(func(a *cliArgs) { a.expected = 2; a.path = "-f.txt" }), ""},
+		{"dash-dash after file", []string{"f.txt", "--"}, with(func(a *cliArgs) { a.path = "f.txt" }), ""},
+		{"dash-dash alone", []string{"--"}, cliArgs{}, "no file given"},
+		{"dash-dash then two files", []string{"--", "a", "b"}, cliArgs{}, "multiple files"},
+		{"file then dash-dash then file", []string{"a", "--", "b"}, cliArgs{}, "multiple files"},
+		{"flag after dash-dash is a file", []string{"--", "-n"}, with(func(a *cliArgs) { a.path = "-n" }), ""},
 		{"no file", nil, cliArgs{}, "no file given"},
 		{"unknown flag", []string{"--bogus", "f.txt"}, cliArgs{}, "unknown flag"},
 		{"two files", []string{"a", "b"}, cliArgs{}, "multiple files"},
@@ -149,6 +155,20 @@ func TestRun_deletesWhenNewIsEmpty(t *testing.T) {
 	}
 	if got, want := readBack(t, path), "a\nc\n"; got != want {
 		t.Errorf("file = %q, want %q", got, want)
+	}
+}
+
+func TestRun_fileNameStartingWithDash(t *testing.T) {
+	t.Chdir(t.TempDir())
+	if err := os.WriteFile("-n", []byte("x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := runWith([]string{"--", "-n"}, "x\n====\ny\n")
+	if r.code != exitOK {
+		t.Fatalf("exit = %d, stderr = %q", r.code, r.stderr)
+	}
+	if got := readBack(t, "-n"); got != "y\n" {
+		t.Errorf("file = %q, want %q", got, "y\n")
 	}
 }
 
