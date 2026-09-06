@@ -34,15 +34,16 @@ Usage:
   old text (one or more lines)
   ====
   new text (zero or more lines)
+  ====
   SUB1
 
-OLD and NEW come from stdin, split at the single line equal to SEP. The final
+OLD and NEW come from stdin, each followed by a line equal to SEP. The final
 newline of each block is dropped. FILE is rewritten only when OLD occurs
 exactly N times; otherwise it is left untouched.
 
 Options:
   -n N            expect OLD N times (default 1)
-  -d SEP          separator line between OLD and NEW (default "====")
+  -d SEP          line that ends OLD and ends NEW (default "====")
   -h, --help      show this help
   -v, --version   show the version
   --instructions  print the paragraph for the agent's instruction file
@@ -56,7 +57,7 @@ Exit codes:
 // instructionsText is the paragraph a coding agent needs in order to use
 // sub1: when to reach for it, how to write the heredoc, what to check before
 // writing it, and how to recover from exit 1. README.md quotes it verbatim.
-const instructionsText = "To replace part of a file from the shell, use `sub1` instead of sed or an ad-hoc script: `sub1 FILE <<'SUB1'`, then the old lines, a line `====`, the new lines, and `SUB1`. Before writing the heredoc, check both blocks: if a line is exactly `SUB1`, use another terminator; if a line is exactly `====`, pass `-d SEP` and write SEP on the separator line instead. The file is rewritten only when the old block occurs exactly once. On exit 1, read the reported count and lines. When the count is 0, a second line, if present, says how the old block differs from the file: fix the old block, or read the file again if there is no second line. Otherwise widen the old block until it is unique, or pass `-n N` for the number of occurrences you expect.\n"
+const instructionsText = "To replace part of a file from the shell, use `sub1` instead of sed or an ad-hoc script: `sub1 FILE <<'SUB1'`, then the old lines, a line `====`, the new lines, another line `====`, and `SUB1`. Before writing the heredoc, check both blocks: if a line is exactly `SUB1`, use another terminator; if a line is exactly `====`, pass `-d SEP` and write SEP on both separator lines instead. The file is rewritten only when the old block occurs exactly once. On exit 1, read the reported count and lines. When the count is 0, a second line, if present, says how the old block differs from the file: fix the old block, or read the file again if there is no second line. Otherwise widen the old block until it is unique, or pass `-n N` for the number of occurrences you expect.\n"
 
 type cliArgs struct {
 	showHelp         bool
