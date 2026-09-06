@@ -134,7 +134,7 @@ Exit codes:
 ```
 
 - Matching is byte-exact: tabs and spaces differ. Line endings are the one exception: when every line of the file ends with CRLF, both blocks are read as CRLF too, so a heredoc can edit such a file, and the summary ends with `(CRLF)`. A file that mixes CRLF and LF is matched as is.
-- An empty new block deletes the old block. To remove a whole line including its line break, start the old block one line earlier and repeat that line in the new block.
+- An empty new block deletes the old block. When the old block is a whole line or a run of whole lines, the line break after it goes too, so the lines disappear instead of leaving a blank line behind. An old block that starts or ends in the middle of a line leaves that line's break where it is, and an old block that ends with a blank line takes nothing beyond it. Deleting a last line that has no line break leaves the file ending with the line break of the line before it.
 - If either block contains a line that is exactly `====` (a Markdown setext underline, for example), pass another separator with `-d`.
 - The file's permissions are kept. Only its contents change.
 - The file is never left half-written. The new contents go to a temporary `.sub1-*` file next to it, which is then renamed into place. If `sub1` is interrupted, the file still has either the old or the new contents, and any leftover `.sub1-*` file can be deleted.
@@ -145,7 +145,7 @@ Exit codes:
 - Regular expressions. The blocks are literal bytes.
 - Editing more than one file per call. Run `sub1` once per file.
 - Reading the text to edit from stdin. stdin carries the blocks; the file to edit is named on the command line and rewritten in place.
-- Ranges such as "from this line to that line". `sub1` only replaces text it was shown, so it never removes more than you wrote in the old block.
+- Ranges such as "from this line to that line". `sub1` only replaces text it was shown, so it never removes more than you wrote in the old block, plus the one line break that follows each occurrence when an empty new block deletes whole lines.
 
 ## License
 

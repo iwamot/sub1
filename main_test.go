@@ -148,13 +148,55 @@ func TestRun_keepsFileMode(t *testing.T) {
 	}
 }
 
-func TestRun_deletesWhenNewIsEmpty(t *testing.T) {
+func TestRun_deletesTheLineWhenNewIsEmpty(t *testing.T) {
 	path := writeTemp(t, "a\nb\nc\n")
-	if r := runWith([]string{path}, "b\n\n====\n"); r.code != exitOK {
+	r := runWith([]string{path}, "b\n====\n")
+	if r.code != exitOK {
 		t.Fatalf("exit = %d, stderr = %q", r.code, r.stderr)
 	}
 	if got, want := readBack(t, path), "a\nc\n"; got != want {
 		t.Errorf("file = %q, want %q", got, want)
+	}
+	if got, want := r.stdout, path+": replaced at line 2\n"; got != want {
+		t.Errorf("stdout = %q, want %q", got, want)
+	}
+}
+
+func TestRun_deletesWhenNewIsEmptyAndOldEndsWithABlankLine(t *testing.T) {
+	path := writeTemp(t, "a\nb\n\nc\n")
+	if r := runWith([]string{path}, "b\n\n====\n"); r.code != exitOK {
+		t.Fatalf("exit = %d, stderr = %q", r.code, r.stderr)
+	}
+	if got, want := readBack(t, path), "a\n\nc\n"; got != want {
+		t.Errorf("file = %q, want %q", got, want)
+	}
+}
+
+func TestRun_deletesTheLineWhenNewIsEmptyInCRLFFile(t *testing.T) {
+	path := writeTemp(t, "a\r\nb\r\nc\r\n")
+	r := runWith([]string{path}, "b\n====\n")
+	if r.code != exitOK {
+		t.Fatalf("exit = %d, stderr = %q", r.code, r.stderr)
+	}
+	if got, want := readBack(t, path), "a\r\nc\r\n"; got != want {
+		t.Errorf("file = %q, want %q", got, want)
+	}
+	if got, want := r.stdout, path+": replaced at line 2 (CRLF)\n"; got != want {
+		t.Errorf("stdout = %q, want %q", got, want)
+	}
+}
+
+func TestRun_deletesEachOccurrenceOnItsOwnWhenNewIsEmpty(t *testing.T) {
+	path := writeTemp(t, "b\nab\nb\n")
+	r := runWith([]string{"-n", "3", path}, "b\n====\n")
+	if r.code != exitOK {
+		t.Fatalf("exit = %d, stderr = %q", r.code, r.stderr)
+	}
+	if got, want := readBack(t, path), "a\n"; got != want {
+		t.Errorf("file = %q, want %q", got, want)
+	}
+	if got, want := r.stdout, path+": replaced at lines 1, 2, 3\n"; got != want {
+		t.Errorf("stdout = %q, want %q", got, want)
 	}
 }
 

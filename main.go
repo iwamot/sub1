@@ -232,7 +232,7 @@ func run(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		}
 		return exitMismatch
 	}
-	if err := atomicfile.WriteFile(a.path, bytes.ReplaceAll(content, old, new)); err != nil {
+	if err := atomicfile.WriteFile(a.path, occur.Replace(content, old, new)); err != nil {
 		fmt.Fprintln(stderr, "sub1:", err)
 		return exitUsage
 	}
