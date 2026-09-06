@@ -96,7 +96,7 @@ func TestE2E_version(t *testing.T) {
 
 func TestE2E_replace(t *testing.T) {
 	path := tempFile(t, "alpha\nbeta\ngamma\n")
-	r := runBin(t, "beta\n====\nBETA\n", path)
+	r := runBin(t, "beta\n====\nBETA\n====\n", path)
 	if r.exitCode != 0 {
 		t.Fatalf("exit = %d, stderr = %q", r.exitCode, r.stderr)
 	}
@@ -114,7 +114,7 @@ func TestE2E_replace(t *testing.T) {
 
 func TestE2E_mismatchLeavesFileUntouched(t *testing.T) {
 	path := tempFile(t, "x\nx\n")
-	r := runBin(t, "x\n====\ny\n", path)
+	r := runBin(t, "x\n====\ny\n====\n", path)
 	if r.exitCode != 1 {
 		t.Fatalf("exit = %d, want 1 (stderr: %q)", r.exitCode, r.stderr)
 	}
@@ -132,7 +132,7 @@ func TestE2E_mismatchLeavesFileUntouched(t *testing.T) {
 
 func TestE2E_countFlag(t *testing.T) {
 	path := tempFile(t, "x\nx\n")
-	r := runBin(t, "x\n====\ny\n", "-n", "2", path)
+	r := runBin(t, "x\n====\ny\n====\n", "-n", "2", path)
 	if r.exitCode != 0 {
 		t.Fatalf("exit = %d, stderr = %q", r.exitCode, r.stderr)
 	}
@@ -150,7 +150,7 @@ func TestE2E_usageError(t *testing.T) {
 
 // stdin on the null device, or closed and reopened there by the Go runtime,
 // is what sandboxes and CI hand to a process. It is not a terminal, so the
-// empty input reaches the block parser and is reported as such.
+// empty input reaches the block parser and is reported as cut short.
 func TestE2E_emptyStdinIsNotATerminal(t *testing.T) {
 	path := tempFile(t, "x\n")
 	devNull := exec.Command(binPath, path)
@@ -161,8 +161,8 @@ func TestE2E_emptyStdinIsNotATerminal(t *testing.T) {
 			if r.exitCode != 2 || r.stdout != "" {
 				t.Errorf("exit = %d, stdout = %q", r.exitCode, r.stdout)
 			}
-			if !strings.Contains(r.stderr, "found 0") || strings.Contains(r.stderr, "terminal") {
-				t.Errorf("stderr = %q, want the separator count, not the terminal message", r.stderr)
+			if !strings.Contains(r.stderr, "is missing") || strings.Contains(r.stderr, "terminal") {
+				t.Errorf("stderr = %q, want the missing closing line, not the terminal message", r.stderr)
 			}
 		})
 	}

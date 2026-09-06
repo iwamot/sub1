@@ -18,5 +18,6 @@ printf 'alpha\nbeta\n' >"$TMP/sample.txt"
 beta
 ====
 gamma
+====
 BLOCK
 grep -qx gamma "$TMP/sample.txt"

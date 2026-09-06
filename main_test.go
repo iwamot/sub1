@@ -119,7 +119,7 @@ func runWith(argv []string, stdin string) runResult {
 
 func TestRun_replacesExactlyOnce(t *testing.T) {
 	path := writeTemp(t, "a\n  foo $x `y` \\n \"q\"\n  bar\nend\n")
-	r := runWith([]string{path}, "  foo $x `y` \\n \"q\"\n  bar\n====\n  FOO\n  BAR\n  BAZ\n")
+	r := runWith([]string{path}, "  foo $x `y` \\n \"q\"\n  bar\n====\n  FOO\n  BAR\n  BAZ\n====\n")
 	if r.code != exitOK || r.stderr != "" {
 		t.Fatalf("exit = %d, stderr = %q", r.code, r.stderr)
 	}
@@ -136,7 +136,7 @@ func TestRun_keepsFileMode(t *testing.T) {
 	if err := os.Chmod(path, 0o640); err != nil {
 		t.Fatal(err)
 	}
-	if r := runWith([]string{path}, "x\n====\ny\n"); r.code != exitOK {
+	if r := runWith([]string{path}, "x\n====\ny\n====\n"); r.code != exitOK {
 		t.Fatalf("exit = %d, stderr = %q", r.code, r.stderr)
 	}
 	info, err := os.Stat(path)
@@ -150,7 +150,7 @@ func TestRun_keepsFileMode(t *testing.T) {
 
 func TestRun_deletesTheLineWhenNewIsEmpty(t *testing.T) {
 	path := writeTemp(t, "a\nb\nc\n")
-	r := runWith([]string{path}, "b\n====\n")
+	r := runWith([]string{path}, "b\n====\n====\n")
 	if r.code != exitOK {
 		t.Fatalf("exit = %d, stderr = %q", r.code, r.stderr)
 	}
@@ -164,7 +164,7 @@ func TestRun_deletesTheLineWhenNewIsEmpty(t *testing.T) {
 
 func TestRun_deletesWhenNewIsEmptyAndOldEndsWithABlankLine(t *testing.T) {
 	path := writeTemp(t, "a\nb\n\nc\n")
-	if r := runWith([]string{path}, "b\n\n====\n"); r.code != exitOK {
+	if r := runWith([]string{path}, "b\n\n====\n====\n"); r.code != exitOK {
 		t.Fatalf("exit = %d, stderr = %q", r.code, r.stderr)
 	}
 	if got, want := readBack(t, path), "a\n\nc\n"; got != want {
@@ -174,7 +174,7 @@ func TestRun_deletesWhenNewIsEmptyAndOldEndsWithABlankLine(t *testing.T) {
 
 func TestRun_deletesTheLineWhenNewIsEmptyInCRLFFile(t *testing.T) {
 	path := writeTemp(t, "a\r\nb\r\nc\r\n")
-	r := runWith([]string{path}, "b\n====\n")
+	r := runWith([]string{path}, "b\n====\n====\n")
 	if r.code != exitOK {
 		t.Fatalf("exit = %d, stderr = %q", r.code, r.stderr)
 	}
@@ -188,7 +188,7 @@ func TestRun_deletesTheLineWhenNewIsEmptyInCRLFFile(t *testing.T) {
 
 func TestRun_deletesEachOccurrenceOnItsOwnWhenNewIsEmpty(t *testing.T) {
 	path := writeTemp(t, "b\nab\nb\n")
-	r := runWith([]string{"-n", "3", path}, "b\n====\n")
+	r := runWith([]string{"-n", "3", path}, "b\n====\n====\n")
 	if r.code != exitOK {
 		t.Fatalf("exit = %d, stderr = %q", r.code, r.stderr)
 	}
@@ -205,7 +205,7 @@ func TestRun_fileNameStartingWithDash(t *testing.T) {
 	if err := os.WriteFile("-n", []byte("x\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	r := runWith([]string{"--", "-n"}, "x\n====\ny\n")
+	r := runWith([]string{"--", "-n"}, "x\n====\ny\n====\n")
 	if r.code != exitOK {
 		t.Fatalf("exit = %d, stderr = %q", r.code, r.stderr)
 	}
@@ -216,7 +216,7 @@ func TestRun_fileNameStartingWithDash(t *testing.T) {
 
 func TestRun_noTrailingNewlineInFile(t *testing.T) {
 	path := writeTemp(t, "abc")
-	if r := runWith([]string{path}, "b\n====\nB\n"); r.code != exitOK {
+	if r := runWith([]string{path}, "b\n====\nB\n====\n"); r.code != exitOK {
 		t.Fatalf("exit = %d, stderr = %q", r.code, r.stderr)
 	}
 	if got := readBack(t, path); got != "aBc" {
@@ -242,7 +242,7 @@ func TestRun_countMismatchLeavesFileUntouched(t *testing.T) {
 				old = "nope"
 			}
 			path := writeTemp(t, original)
-			r := runWith(append([]string{path}, tt.argv...), old+"\n====\ny\n")
+			r := runWith(append([]string{path}, tt.argv...), old+"\n====\ny\n====\n")
 			if r.code != exitMismatch {
 				t.Fatalf("exit = %d, want 1 (stderr: %q)", r.code, r.stderr)
 			}
@@ -261,7 +261,7 @@ func TestRun_countMismatchLeavesFileUntouched(t *testing.T) {
 
 func TestRun_absentBlockGetsHint(t *testing.T) {
 	path := writeTemp(t, "a\n\tb\n")
-	r := runWith([]string{path}, "a\n  b\n====\nc\n")
+	r := runWith([]string{path}, "a\n  b\n====\nc\n====\n")
 	if r.code != exitMismatch {
 		t.Fatalf("exit = %d, want 1 (stderr: %q)", r.code, r.stderr)
 	}
@@ -279,10 +279,10 @@ func TestRun_crlfFileIsEditedAsCRLF(t *testing.T) {
 		stdin string
 		want  string
 	}{
-		{"multi-line blocks", "one\r\ntwo\r\nthree\r\n", "two\nthree\n====\ntwo\nfour\n", "one\r\ntwo\r\nfour\r\n"},
-		{"one-line old, multi-line new", "one\r\ntwo\r\nthree\r\n", "two\n====\ntwo\ntwo-and-a-half\n", "one\r\ntwo\r\ntwo-and-a-half\r\nthree\r\n"},
-		{"no final line break", "one\r\ntwo", "two\n====\n2\n", "one\r\n2"},
-		{"deletion keeps the line breaks it was shown", "a\r\nb\r\nc\r\n", "a\nb\n====\na\n", "a\r\nc\r\n"},
+		{"multi-line blocks", "one\r\ntwo\r\nthree\r\n", "two\nthree\n====\ntwo\nfour\n====\n", "one\r\ntwo\r\nfour\r\n"},
+		{"one-line old, multi-line new", "one\r\ntwo\r\nthree\r\n", "two\n====\ntwo\ntwo-and-a-half\n====\n", "one\r\ntwo\r\ntwo-and-a-half\r\nthree\r\n"},
+		{"no final line break", "one\r\ntwo", "two\n====\n2\n====\n", "one\r\n2"},
+		{"deletion keeps the line breaks it was shown", "a\r\nb\r\nc\r\n", "a\nb\n====\na\n====\n", "a\r\nc\r\n"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -303,7 +303,7 @@ func TestRun_crlfFileIsEditedAsCRLF(t *testing.T) {
 
 func TestRun_crlfFileHintIgnoresLineEndings(t *testing.T) {
 	path := writeTemp(t, "a\r\n\tb\r\n")
-	r := runWith([]string{path}, "a\n  b\n====\nc\n")
+	r := runWith([]string{path}, "a\n  b\n====\nc\n====\n")
 	if r.code != exitMismatch {
 		t.Fatalf("exit = %d, want 1 (stderr: %q)", r.code, r.stderr)
 	}
@@ -317,7 +317,7 @@ func TestRun_crlfFileHintIgnoresLineEndings(t *testing.T) {
 func TestRun_mixedLineEndingsAreMatchedAsIs(t *testing.T) {
 	original := "a\r\nb\nc\r\n"
 	path := writeTemp(t, original)
-	r := runWith([]string{path}, "a\nb\nc\n====\nx\n")
+	r := runWith([]string{path}, "a\nb\nc\n====\nx\n====\n")
 	if r.code != exitMismatch {
 		t.Fatalf("exit = %d, want 1 (stderr: %q)", r.code, r.stderr)
 	}
@@ -333,7 +333,7 @@ func TestRun_mixedLineEndingsAreMatchedAsIs(t *testing.T) {
 
 func TestRun_fileWithoutLineBreakStaysLF(t *testing.T) {
 	path := writeTemp(t, "abc")
-	r := runWith([]string{path}, "b\n====\nx\ny\n")
+	r := runWith([]string{path}, "b\n====\nx\ny\n====\n")
 	if r.code != exitOK || r.stderr != "" {
 		t.Fatalf("exit = %d, stderr = %q", r.code, r.stderr)
 	}
@@ -348,7 +348,7 @@ func TestRun_fileWithoutLineBreakStaysLF(t *testing.T) {
 func TestRun_blocksWithCRAreTakenLiterally(t *testing.T) {
 	original := "a\r\nb\r\n"
 	path := writeTemp(t, original)
-	r := runWith([]string{path}, "a\r\nb\n====\nA\r\nB\n")
+	r := runWith([]string{path}, "a\r\nb\n====\nA\r\nB\n====\n")
 	if r.code != exitOK || r.stderr != "" {
 		t.Fatalf("exit = %d, stderr = %q", r.code, r.stderr)
 	}
@@ -362,7 +362,7 @@ func TestRun_blocksWithCRAreTakenLiterally(t *testing.T) {
 
 func TestRun_countMatchesReplacesAll(t *testing.T) {
 	path := writeTemp(t, "x(1)\ny\nx(2)\nx(3)\n")
-	r := runWith([]string{"-n", "3", path}, "x(\n====\nz(\n")
+	r := runWith([]string{"-n", "3", path}, "x(\n====\nz(\n====\n")
 	if r.code != exitOK {
 		t.Fatalf("exit = %d, stderr = %q", r.code, r.stderr)
 	}
@@ -376,7 +376,7 @@ func TestRun_countMatchesReplacesAll(t *testing.T) {
 
 func TestRun_customSeparator(t *testing.T) {
 	path := writeTemp(t, "Title\n====\nbody\n")
-	r := runWith([]string{"-d", "%%", path}, "Title\n====\n%%\nTitle\n----\n")
+	r := runWith([]string{"-d", "%%", path}, "Title\n====\n%%\nTitle\n----\n%%\n")
 	if r.code != exitOK {
 		t.Fatalf("exit = %d, stderr = %q", r.code, r.stderr)
 	}
@@ -388,7 +388,7 @@ func TestRun_customSeparator(t *testing.T) {
 func TestRun_badStdinIsUsageError(t *testing.T) {
 	original := "x\n"
 	path := writeTemp(t, original)
-	r := runWith([]string{path}, "x\n====\ny\n====\nz\n")
+	r := runWith([]string{path}, "x\n====\ny\n====\nz\n====\n")
 	if r.code != exitUsage {
 		t.Fatalf("exit = %d, want 2", r.code)
 	}
@@ -412,7 +412,7 @@ func TestRun_usageError(t *testing.T) {
 
 func TestRun_missingFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "absent.txt")
-	r := runWith([]string{path}, "x\n====\ny\n")
+	r := runWith([]string{path}, "x\n====\ny\n====\n")
 	if r.code != exitUsage {
 		t.Errorf("exit = %d, want 2", r.code)
 	}
@@ -430,7 +430,7 @@ func TestRun_unwritableFile(t *testing.T) {
 	if err := os.WriteFile(path, []byte("x\n"), 0o400); err != nil {
 		t.Fatal(err)
 	}
-	r := runWith([]string{path}, "x\n====\ny\n")
+	r := runWith([]string{path}, "x\n====\ny\n====\n")
 	if r.code != exitUsage {
 		t.Errorf("exit = %d, want 2 (stderr: %q)", r.code, r.stderr)
 	}
@@ -475,8 +475,8 @@ func TestRun_help(t *testing.T) {
 		if !strings.HasPrefix(r.stdout, "sub1 — ") || !strings.Contains(r.stdout, "Usage:") {
 			t.Errorf("%s: stdout = %q", flag, r.stdout)
 		}
-		if n := strings.Count(r.stdout, "\n"); n > 24 {
-			t.Errorf("%s: help is %d lines, want at most 24", flag, n)
+		if n := strings.Count(r.stdout, "\n"); n > 25 {
+			t.Errorf("%s: help is %d lines, want at most 25", flag, n)
 		}
 	}
 }
