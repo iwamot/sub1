@@ -32,6 +32,48 @@ func TestLines(t *testing.T) {
 	}
 }
 
+func TestReplace(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		old     string
+		new     string
+		want    string
+	}{
+		{"absent", "a\nb\n", "z", "y", "a\nb\n"},
+		{"replaces every occurrence", "x(1)\ny\nx(2)\n", "x(", "z(", "z(1)\ny\nz(2)\n"},
+		{"replacement is literal", "a\nb\n", "b", "\n", "a\n\n\n"},
+		{"overlapping candidates are not double replaced", "aaa\n", "aa", "b", "ba\n"},
+
+		{"empty new deletes the whole line", "a\nb\nc\n", "b", "", "a\nc\n"},
+		{"empty new deletes several whole lines", "a\nb\nc\nd\n", "b\nc", "", "a\nd\n"},
+		{"empty new deletes the first line", "b\nc\n", "b", "", "c\n"},
+		{"empty new deletes a CRLF line", "a\r\nb\r\nc\r\n", "b", "", "a\r\nc\r\n"},
+		{"empty new deletes the line break the file has", "a\r\nb\nc\r\n", "b", "", "a\r\nc\r\n"},
+		{"empty new deletes the line break the file has, the other way", "a\nb\r\nc\n", "b", "", "a\nc\n"},
+		{"empty new deletes a line that starts with a blank line", "a\n\nb\nc\n", "\nb", "", "a\nc\n"},
+		{"empty new deletes each occurrence on its own", "b\nab\nb\n", "b", "", "a\n"},
+		{"empty new deletes the whole file", "b\n", "b", "", ""},
+		{"empty new deletes a last line without a line break", "a\nb", "b", "", "a\n"},
+
+		{"empty new keeps the line break of a mid-line old", "ab\ncd\n", "b", "", "a\ncd\n"},
+		{"empty new keeps the line break when old ends a line", "ab\ncd\n", "b\ncd", "", "a\n"},
+		{"empty new keeps the line break of adjacent mid-line occurrences", "bb\n", "b", "", "\n"},
+		{"empty new keeps a blank line after an old that ends with one", "a\nb\n\nc\n", "b\n", "", "a\n\nc\n"},
+		{"empty new keeps a blank line after a multi-line old that ends with one", "a\nb\nc\n\nd\n", "b\nc\n", "", "a\n\nd\n"},
+		{"empty new keeps the line break of a CRLF old", "a\r\nb\r\n\r\nc\r\n", "b\r\n", "", "a\r\n\r\nc\r\n"},
+		{"empty new keeps a lone CR", "a\nb\rc\n", "b", "", "a\n\rc\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Replace([]byte(tt.content), []byte(tt.old), []byte(tt.new))
+			if string(got) != tt.want {
+				t.Errorf("Replace = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestMismatch(t *testing.T) {
 	tests := []struct {
 		name     string

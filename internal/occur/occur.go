@@ -15,17 +15,67 @@ var newline = []byte("\n")
 
 // Lines returns the 1-based line number at which each non-overlapping
 // occurrence of old starts, in order. The occurrences are the same ones
-// bytes.Count and bytes.ReplaceAll see, so len(Lines(...)) is the count that
-// decides whether the file is rewritten.
+// Replace rewrites, so len(Lines(...)) is the count that decides whether the
+// file is rewritten.
 func Lines(content, old []byte) []int {
 	var lines []int
+	for _, pos := range offsets(content, old) {
+		lines = append(lines, bytes.Count(content[:pos], newline)+1)
+	}
+	return lines
+}
+
+// Replace returns content with every non-overlapping occurrence of old
+// replaced by new.
+//
+// An empty new block deletes the old block, and it deletes the line break
+// after it as well when the old block is a whole line or a run of whole
+// lines: the occurrence starts a line (it is at the start of the file or
+// follows a "\n"), old does not itself end with "\n", and a line break comes
+// right after it. That line break is the one the heredoc dropped from the
+// last line of the old block, so the rule is what "delete the old block"
+// means when the block was written as lines. An old block that ends with a
+// blank line already carries its own line break and takes nothing more. The
+// line break is deleted as it is in the file, CRLF or LF, so the rule needs
+// no knowledge of the file's line endings. Each occurrence is judged on its
+// own, against the original content.
+func Replace(content, old, new []byte) []byte {
+	var out []byte
+	pos := 0
+	for _, i := range offsets(content, old) {
+		out = append(out, content[pos:i]...)
+		out = append(out, new...)
+		pos = i + len(old)
+		if len(new) == 0 && (i == 0 || content[i-1] == '\n') && !bytes.HasSuffix(old, newline) {
+			pos += lineBreakLen(content[pos:])
+		}
+	}
+	return append(out, content[pos:]...)
+}
+
+// lineBreakLen returns the length of the line break b starts with, or 0.
+func lineBreakLen(b []byte) int {
+	switch {
+	case bytes.HasPrefix(b, []byte("\r\n")):
+		return 2
+	case bytes.HasPrefix(b, newline):
+		return 1
+	}
+	return 0
+}
+
+// offsets returns the byte offset of each non-overlapping occurrence of old
+// in content, in order. It is the one scan behind Lines and Replace, so the
+// occurrences that are counted are the ones that are rewritten.
+func offsets(content, old []byte) []int {
+	var found []int
 	for pos := 0; ; {
 		i := bytes.Index(content[pos:], old)
 		if i < 0 {
-			return lines
+			return found
 		}
 		pos += i
-		lines = append(lines, bytes.Count(content[:pos], newline)+1)
+		found = append(found, pos)
 		pos += len(old)
 	}
 }
