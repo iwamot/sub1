@@ -61,13 +61,19 @@ func TestSplit(t *testing.T) {
 			name:    "closing separator must fill the whole line",
 			input:   "a\n====\nb\n==== \n",
 			sep:     sep,
-			wantErr: "closing \"====\" line is missing",
+			wantErr: "line 4 looks like \"====\" but has trailing whitespace; closing \"====\" line is missing",
 		},
 		{
 			name:    "middle separator must fill the whole line",
-			input:   "a\n==== \nb\n====\n",
+			input:   "a\n====\t\nb\n====\n",
 			sep:     sep,
-			wantErr: "found the closing \"====\" line but no \"====\" line between",
+			wantErr: "line 2 looks like \"====\" but has trailing whitespace; no \"====\" line between",
+		},
+		{
+			name:    "closing separator with trailing whitespace is named even when the middle one is fine",
+			input:   "a\n==== \nb\n==== \n",
+			sep:     sep,
+			wantErr: "line 2 looks like \"====\" but has trailing whitespace; closing",
 		},
 		{
 			name:    "old form without the closing separator",

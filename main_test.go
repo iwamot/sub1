@@ -195,8 +195,41 @@ func TestRun_deletesEachOccurrenceOnItsOwnWhenNewIsEmpty(t *testing.T) {
 	if got, want := readBack(t, path), "a\n"; got != want {
 		t.Errorf("file = %q, want %q", got, want)
 	}
-	if got, want := r.stdout, path+": replaced at lines 1, 2, 3\n"; got != want {
+	if got, want := r.stdout, path+": replaced at lines 1, 2, 3 (1 match starts inside an identifier)\n"; got != want {
 		t.Errorf("stdout = %q, want %q", got, want)
+	}
+}
+
+func TestRun_notesFollowCRLFInOneParenthesis(t *testing.T) {
+	path := writeTemp(t, "one\r\nmax = 1\r\n")
+	r := runWith([]string{path}, "x = 1\n====\nx = 2\n====\n")
+	if r.code != exitOK || r.stderr != "" {
+		t.Fatalf("exit = %d, stderr = %q", r.code, r.stderr)
+	}
+	if want := path + ": replaced at line 2 (CRLF; 1 match starts inside an identifier)\n"; r.stdout != want {
+		t.Errorf("stdout = %q, want %q", r.stdout, want)
+	}
+	if got, want := readBack(t, path), "one\r\nmax = 2\r\n"; got != want {
+		t.Errorf("file = %q, want %q", got, want)
+	}
+}
+
+func TestRun_secondRunOfAnInsertionIsNoted(t *testing.T) {
+	path := writeTemp(t, "import os\n")
+	stdin := "import os\n====\nimport os\nimport sys\n====\n"
+	first := runWith([]string{path}, stdin)
+	if first.code != exitOK || first.stdout != path+": replaced at line 1\n" {
+		t.Fatalf("first run: exit = %d, stdout = %q, stderr = %q", first.code, first.stdout, first.stderr)
+	}
+	second := runWith([]string{path}, stdin)
+	if second.code != exitOK || second.stderr != "" {
+		t.Fatalf("second run: exit = %d, stderr = %q", second.code, second.stderr)
+	}
+	if want := path + ": replaced at line 1 (the file already contained the new block)\n"; second.stdout != want {
+		t.Errorf("stdout = %q, want %q", second.stdout, want)
+	}
+	if got, want := readBack(t, path), "import os\nimport sys\nimport sys\n"; got != want {
+		t.Errorf("file = %q, want %q", got, want)
 	}
 }
 
@@ -337,7 +370,7 @@ func TestRun_fileWithoutLineBreakStaysLF(t *testing.T) {
 	if r.code != exitOK || r.stderr != "" {
 		t.Fatalf("exit = %d, stderr = %q", r.code, r.stderr)
 	}
-	if want := path + ": replaced at line 1\n"; r.stdout != want {
+	if want := path + ": replaced at line 1 (1 match starts inside an identifier; 1 match ends inside an identifier; 1 match starts mid-line with a multi-line new block)\n"; r.stdout != want {
 		t.Errorf("stdout = %q, want %q", r.stdout, want)
 	}
 	if got := readBack(t, path); got != "ax\nyc" {

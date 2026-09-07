@@ -159,15 +159,75 @@ func TestSummary(t *testing.T) {
 	tests := []struct {
 		name  string
 		lines []int
+		notes []string
 		want  string
 	}{
-		{"one", []int{7}, "f.txt: replaced at line 7"},
-		{"many", []int{1, 3, 4}, "f.txt: replaced at lines 1, 3, 4"},
+		{"one", []int{7}, nil, "f.txt: replaced at line 7"},
+		{"many", []int{1, 3, 4}, nil, "f.txt: replaced at lines 1, 3, 4"},
+		{"one note", []int{7}, []string{"CRLF"}, "f.txt: replaced at line 7 (CRLF)"},
+		{"several notes", []int{7}, []string{"CRLF", "1 match ends inside an identifier"}, "f.txt: replaced at line 7 (CRLF; 1 match ends inside an identifier)"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := Summary("f.txt", tt.lines); got != tt.want {
+			if got := Summary("f.txt", tt.lines, tt.notes); got != tt.want {
 				t.Errorf("Summary = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNotes(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		old     string
+		new     string
+		want    []string
+	}{
+		// Nothing to note.
+		{"whole line", "a\n  foo\nb\n", "  foo", "  bar", nil},
+		{"whole lines with a multi-line new", "a\n  foo\nb\n", "  foo", "  bar\n  baz", nil},
+		{"call site rename after a space", "x = _tool_chunks(c)\n", "_tool_chunks(", "tool_chunks(", nil},
+		{"call site rename after a dot", "self._tool_chunks(c)\n", "_tool_chunks(", "tool_chunks(", nil},
+		{"old ends with punctuation before an identifier", "foo(x)\n", "foo(", "bar(", nil},
+		{"old starts with punctuation after an identifier", "foo(x)\n", "(x)", "(y)", nil},
+		{"indented one-line old with a one-line new", "    return 1\n", "  return 1", "  return 2", nil},
+		{"match at the start of the file", "x = 1\n", "x", "y", nil},
+		{"match at the end of the file", "-a", "a", "b", nil},
+		{"new contains old but the file does not contain new", "import os\n", "import os", "import os\nimport sys", nil},
+		{"file contains new but new does not contain old", "foo\nbar\n", "foo", "bar", nil},
+
+		// Inside an identifier.
+		{"starts inside an identifier", "max = 1\n", "x = 1", "x = 2", []string{"1 match starts inside an identifier"}},
+		{"starts inside an identifier after a digit", "x1y\n", "y", "z", []string{"1 match starts inside an identifier"}},
+		{"starts inside an identifier after an underscore", "a_b\n", "b", "c", []string{"1 match starts inside an identifier"}},
+		{"ends inside an identifier", "returned\n", "return", "yield", []string{"1 match ends inside an identifier"}},
+		{"ends inside an identifier before an uppercase letter", "getValue\n", "get", "set", []string{"1 match ends inside an identifier"}},
+		{"both ends inside an identifier", "xyz\n", "y", "q", []string{"1 match starts inside an identifier", "1 match ends inside an identifier"}},
+		{"several occurrences are counted", "ab\nab\ncb\n", "b", "d", []string{"3 matches start inside an identifier"}},
+		{"only the occurrences inside are counted", "ab\nb\n", "b", "d", []string{"1 match starts inside an identifier"}},
+
+		// Mid-line with a multi-line new.
+		{"indented one-line old with a multi-line new", "    return 1\n", "  return 1", "  if x:\n      return 2", []string{"1 match starts mid-line with a multi-line new block"}},
+		{"unindented one-line old with a multi-line new", "    return 1\n", "return 1", "if x:\n    return 2", []string{"1 match starts mid-line with a multi-line new block"}},
+		{"multi-line old whose first line is short", "    if x:\n        return 1\n", "if x:\n        return 1", "if y:\n        return 2", []string{"1 match starts mid-line with a multi-line new block"}},
+		{"expression replaced by several lines", "x = foo(a)\n", "foo(a)", "foo(\n    a,\n)", []string{"1 match starts mid-line with a multi-line new block"}},
+		{"mid-line in a CRLF file", "    return 1\r\n", "return 1", "if x:\r\n    return 2", []string{"1 match starts mid-line with a multi-line new block"}},
+		{"identifier and mid-line together", "max = 1\n", "x = 1", "x = 2\ny = 3", []string{"1 match starts inside an identifier", "1 match starts mid-line with a multi-line new block"}},
+
+		// The file already contained new.
+		{"second run of an insertion after a line", "import os\nimport sys\n", "import os", "import os\nimport sys", []string{"the file already contained the new block"}},
+		{"second run of an insertion before a line", "x = 1\nfoo(x)\n", "foo(x)", "x = 1\nfoo(x)", []string{"the file already contained the new block"}},
+		{"second run of a rename inside a line", "foo_bar\n", "foo", "foo_bar", []string{"1 match ends inside an identifier", "the file already contained the new block"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if Lines([]byte(tt.content), []byte(tt.old)) == nil {
+				t.Fatal("test case must match")
+			}
+			got := Notes([]byte(tt.content), []byte(tt.old), []byte(tt.new))
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("Notes = %q, want %q", got, tt.want)
 			}
 		})
 	}
