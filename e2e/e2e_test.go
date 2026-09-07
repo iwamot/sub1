@@ -150,7 +150,8 @@ func TestE2E_usageError(t *testing.T) {
 
 // stdin on the null device, or closed and reopened there by the Go runtime,
 // is what sandboxes and CI hand to a process. It is not a terminal, so the
-// empty input reaches the block parser and is reported as cut short.
+// empty input reaches the block parser and is reported as empty rather than
+// as a terminal waiting for a heredoc.
 func TestE2E_emptyStdinIsNotATerminal(t *testing.T) {
 	path := tempFile(t, "x\n")
 	devNull := exec.Command(binPath, path)
@@ -161,8 +162,8 @@ func TestE2E_emptyStdinIsNotATerminal(t *testing.T) {
 			if r.exitCode != 2 || r.stdout != "" {
 				t.Errorf("exit = %d, stdout = %q", r.exitCode, r.stdout)
 			}
-			if !strings.Contains(r.stderr, "is missing") || strings.Contains(r.stderr, "terminal") {
-				t.Errorf("stderr = %q, want the missing closing line, not the terminal message", r.stderr)
+			if !strings.Contains(r.stderr, "no input on stdin") || strings.Contains(r.stderr, "terminal") {
+				t.Errorf("stderr = %q, want the empty-input message, not the terminal message", r.stderr)
 			}
 		})
 	}

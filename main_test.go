@@ -263,9 +263,9 @@ func TestRun_countMismatchLeavesFileUntouched(t *testing.T) {
 		argv     []string
 		wantLine string
 	}{
-		{"absent", nil, "old block found 0 times, expected 1\n"},
-		{"duplicate", nil, "old block found 2 times (lines 1, 2), expected 1\n"},
-		{"fewer than -n", []string{"-n", "3"}, "old block found 2 times (lines 1, 2), expected 3\n"},
+		{"absent", nil, "old block found 0 times, expected 1; no similar text found, read the file again\n"},
+		{"duplicate", nil, "old block found 2 times (lines 1, 2), expected 1; widen the old block, or pass -n 2\n"},
+		{"fewer than -n", []string{"-n", "3"}, "old block found 2 times (lines 1, 2), expected 3; pass -n 2, or read the file again\n"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -299,7 +299,7 @@ func TestRun_absentBlockGetsHint(t *testing.T) {
 		t.Fatalf("exit = %d, want 1 (stderr: %q)", r.code, r.stderr)
 	}
 	want := "sub1: " + path + ": old block found 0 times, expected 1\n" +
-		"  near line 1: file line 2 starts with 1 tab, old block line 2 with 2 spaces\n"
+		"  hint: file line 2 starts with 1 tab, old block line 2 with 2 spaces (near line 1)\n"
 	if r.stderr != want {
 		t.Errorf("stderr = %q, want %q", r.stderr, want)
 	}
@@ -341,7 +341,7 @@ func TestRun_crlfFileHintIgnoresLineEndings(t *testing.T) {
 		t.Fatalf("exit = %d, want 1 (stderr: %q)", r.code, r.stderr)
 	}
 	want := "sub1: " + path + ": old block found 0 times, expected 1\n" +
-		"  near line 1: file line 2 starts with 1 tab, old block line 2 with 2 spaces\n"
+		"  hint: file line 2 starts with 1 tab, old block line 2 with 2 spaces (near line 1)\n"
 	if r.stderr != want {
 		t.Errorf("stderr = %q, want %q", r.stderr, want)
 	}
@@ -355,7 +355,7 @@ func TestRun_mixedLineEndingsAreMatchedAsIs(t *testing.T) {
 		t.Fatalf("exit = %d, want 1 (stderr: %q)", r.code, r.stderr)
 	}
 	want := "sub1: " + path + ": old block found 0 times, expected 1\n" +
-		"  near line 1: the file has mixed line endings\n"
+		"  hint: the file has mixed line endings (near line 1)\n"
 	if r.stderr != want {
 		t.Errorf("stderr = %q, want %q", r.stderr, want)
 	}
@@ -425,7 +425,7 @@ func TestRun_badStdinIsUsageError(t *testing.T) {
 	if r.code != exitUsage {
 		t.Fatalf("exit = %d, want 2", r.code)
 	}
-	if !strings.Contains(r.stderr, "found 2") {
+	if !strings.Contains(r.stderr, "found 3 \"====\" lines, expected 2") {
 		t.Errorf("stderr = %q", r.stderr)
 	}
 	if got := readBack(t, path); got != original {
@@ -446,11 +446,12 @@ func TestRun_usageError(t *testing.T) {
 func TestRun_missingFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "absent.txt")
 	r := runWith([]string{path}, "x\n====\ny\n====\n")
-	if r.code != exitUsage {
-		t.Errorf("exit = %d, want 2", r.code)
+	if r.code != exitFile {
+		t.Errorf("exit = %d, want 3", r.code)
 	}
-	if r.stderr == "" {
-		t.Error("expected an error on stderr")
+	// The path is the one that was passed, with no "open" in front of it.
+	if want := "sub1: " + path + ": no such file or directory\n"; r.stderr != want {
+		t.Errorf("stderr = %q, want %q", r.stderr, want)
 	}
 }
 
@@ -464,8 +465,37 @@ func TestRun_unwritableFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := runWith([]string{path}, "x\n====\ny\n====\n")
-	if r.code != exitUsage {
-		t.Errorf("exit = %d, want 2 (stderr: %q)", r.code, r.stderr)
+	if r.code != exitFile {
+		t.Errorf("exit = %d, want 3 (stderr: %q)", r.code, r.stderr)
+	}
+	if want := "sub1: " + path + ": permission denied\n"; r.stderr != want {
+		t.Errorf("stderr = %q, want %q", r.stderr, want)
+	}
+}
+
+// A file error names the file even when the thing that failed is the
+// directory around it, so that every exit 3 line reads the same way.
+func TestRun_unwritableDirNamesTheFile(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.txt")
+	if err := os.WriteFile(path, []byte("x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(dir, 0o700) })
+
+	r := runWith([]string{path}, "x\n====\ny\n====\n")
+	if r.code != exitFile {
+		t.Errorf("exit = %d, want 3 (stderr: %q)", r.code, r.stderr)
+	}
+	want := "sub1: " + path + ": cannot create a temporary file in " + dir + ": permission denied\n"
+	if r.stderr != want {
+		t.Errorf("stderr = %q, want %q", r.stderr, want)
 	}
 }
 
@@ -508,8 +538,11 @@ func TestRun_help(t *testing.T) {
 		if !strings.HasPrefix(r.stdout, "sub1 — ") || !strings.Contains(r.stdout, "Usage:") {
 			t.Errorf("%s: stdout = %q", flag, r.stdout)
 		}
-		if n := strings.Count(r.stdout, "\n"); n > 25 {
-			t.Errorf("%s: help is %d lines, want at most 25", flag, n)
+		if !strings.Contains(r.stdout, "Examples:") {
+			t.Errorf("%s: help has no examples", flag)
+		}
+		if n := strings.Count(r.stdout, "\n"); n > 60 {
+			t.Errorf("%s: help is %d lines, want at most 60", flag, n)
 		}
 	}
 }
@@ -522,8 +555,16 @@ func TestRun_instructions(t *testing.T) {
 	if r.stdout != instructionsText {
 		t.Errorf("stdout = %q", r.stdout)
 	}
-	if strings.Count(r.stdout, "\n") != 1 || !strings.HasSuffix(r.stdout, "\n") {
-		t.Error("instructions must be a single paragraph ending in a newline")
+	if !strings.HasSuffix(r.stdout, "\n") {
+		t.Error("instructions must end in a newline")
+	}
+	// The paragraph is pasted into an instruction file, so it carries the
+	// call it describes as an indented block and nothing else.
+	if !strings.Contains(r.stdout, "\n    sub1 FILE <<'SUB1'\n") {
+		t.Errorf("instructions have no example call: %q", r.stdout)
+	}
+	if strings.Contains(r.stdout, "exit 1") || strings.Contains(r.stdout, "-n N") {
+		t.Errorf("instructions repeat what the output already says: %q", r.stdout)
 	}
 }
 

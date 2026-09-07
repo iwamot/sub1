@@ -103,7 +103,9 @@ func TestWriteFileUnwritableDir(t *testing.T) {
 	if err == nil {
 		t.Fatal("WriteFile succeeded in an unwritable directory")
 	}
-	want := path + ": cannot create a temporary file in " + dir + ": permission denied"
+	// The caller puts the file's name in front; WriteFile names only the
+	// directory, which is what needs write permission.
+	want := "cannot create a temporary file in " + dir + ": permission denied"
 	if err.Error() != want {
 		t.Errorf("error = %q, want %q", err, want)
 	}
