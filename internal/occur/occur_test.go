@@ -79,15 +79,18 @@ func TestMismatch(t *testing.T) {
 		name     string
 		lines    []int
 		expected int
+		hinted   bool
 		want     string
 	}{
-		{"none", nil, 1, "f.txt: old block found 0 times, expected 1"},
-		{"one but wanted more", []int{7}, 2, "f.txt: old block found once (line 7), expected 2"},
-		{"many", []int{1, 3, 4}, 1, "f.txt: old block found 3 times (lines 1, 3, 4), expected 1"},
+		{"none", nil, 1, false, "f.txt: old block found 0 times, expected 1; no similar text found, read the file again"},
+		{"none with a hint to follow", nil, 1, true, "f.txt: old block found 0 times, expected 1"},
+		{"one but wanted more", []int{7}, 2, false, "f.txt: old block found once (line 7), expected 2; pass -n 1, or read the file again"},
+		{"many", []int{1, 3, 4}, 1, false, "f.txt: old block found 3 times (lines 1, 3, 4), expected 1; widen the old block, or pass -n 3"},
+		{"hinted only drops the tail when nothing was found", []int{1, 3}, 1, true, "f.txt: old block found 2 times (lines 1, 3), expected 1; widen the old block, or pass -n 2"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := Mismatch("f.txt", tt.lines, tt.expected); got != tt.want {
+			if got := Mismatch("f.txt", tt.lines, tt.expected, tt.hinted); got != tt.want {
 				t.Errorf("Mismatch = %q, want %q", got, tt.want)
 			}
 		})
@@ -102,48 +105,48 @@ func TestHint(t *testing.T) {
 		want    string
 	}{
 		{"nothing close", "a\nb\n", "z", ""},
-		{"file uses CRLF", "a\r\nb\r\n", "a\nb", "near line 1: the file uses CRLF line endings"},
-		{"file mixes CRLF and LF", "a\r\nb\nc\r\n", "a\nb\nc", "near line 1: the file has mixed line endings"},
-		{"mixed line endings and tabs", "x\n\tfoo\r\n\tbar\n", "  foo\n  bar", "near line 2: the file has mixed line endings; file line 2 starts with 1 tab, old block line 1 with 2 spaces"},
+		{"file uses CRLF", "a\r\nb\r\n", "a\nb", "the file uses CRLF line endings (near line 1)"},
+		{"file mixes CRLF and LF", "a\r\nb\nc\r\n", "a\nb\nc", "the file has mixed line endings (near line 1)"},
+		{"mixed line endings and tabs", "x\n\tfoo\r\n\tbar\n", "  foo\n  bar", "the file has mixed line endings; file line 2 starts with 1 tab, old block line 1 with 2 spaces (near line 2)"},
 		{"old block CRLF gets no hint", "a\nb\n", "a\r\nb", ""},
-		{"file has trailing whitespace", "x\na \nb\n", "a\nb", "near line 2: file line 2 ends with 1 space, old block line 1 with no trailing whitespace"},
-		{"old block has trailing whitespace", "x\na\nb\n", "a\nb\t", "near line 2: file line 3 ends with no trailing whitespace, old block line 2 with 1 tab"},
-		{"trailing whitespace later in the block", "a\nb\t\nc\n", "a\nb\nc", "near line 1: file line 2 ends with 1 tab, old block line 2 with no trailing whitespace"},
-		{"both ends carry trailing whitespace, in different amounts", "a  \nb\n", "a \nb", "near line 1: file line 1 ends with 2 spaces, old block line 1 with 1 space"},
-		{"a line whose trailing whitespace matches is passed over", "a  \nb  \nc\n", "a  \nb\nc", "near line 1: file line 2 ends with 2 spaces, old block line 2 with no trailing whitespace"},
-		{"tabs versus spaces", "x\n\tfoo\n\tbar\n", "  foo\n  bar", "near line 2: file line 2 starts with 1 tab, old block line 1 with 2 spaces"},
-		{"indentation differs later in the block", "foo\n    bar\n", "foo\n  bar", "near line 1: file line 2 starts with 4 spaces, old block line 2 with 2 spaces"},
-		{"mixed and none", "\t  foo\n  bar\n", "foo\nbar", "near line 1: file line 1 starts with mixed tabs and spaces, old block line 1 with no indentation"},
-		{"several tabs", "\t\tfoo\n\t\tbar\n", "\tfoo\n\tbar", "near line 1: file line 1 starts with 2 tabs, old block line 1 with 1 tab"},
-		{"whitespace hint reports every match", "\tfoo\nx\n\tfoo\n", "  foo", "near lines 1, 3: file line 1 starts with 1 tab, old block line 1 with 2 spaces"},
-		{"inner spaces", "a  b\nc\n", "a b\nc", "near line 1: file line 1 has 2 spaces where the old block has 1 space"},
-		{"inner tab versus space", "x\na\tb\n", "a b", "near line 2: file line 2 has 1 tab where the old block has 1 space"},
-		{"inner difference later in the block", "x\na b\n", "x\na  b", "near line 1: file line 2 has 1 space where the old block has 2 spaces"},
-		{"inner difference after an equal run", "a b  c\n", "a b c", "near line 1: file line 1 has 2 spaces where the old block has 1 space"},
-		{"inner mixed run", "a \t b\n", "a b", "near line 1: file line 1 has mixed tabs and spaces where the old block has 1 space"},
-		{"leading and inner together", "\ta  b\n", "  a b", "near line 1: file line 1 has 1 tab where the old block has 2 spaces"},
+		{"file has trailing whitespace", "x\na \nb\n", "a\nb", "file line 2 ends with 1 space, old block line 1 with no trailing whitespace (near line 2)"},
+		{"old block has trailing whitespace", "x\na\nb\n", "a\nb\t", "file line 3 ends with no trailing whitespace, old block line 2 with 1 tab (near line 2)"},
+		{"trailing whitespace later in the block", "a\nb\t\nc\n", "a\nb\nc", "file line 2 ends with 1 tab, old block line 2 with no trailing whitespace (near line 1)"},
+		{"both ends carry trailing whitespace, in different amounts", "a  \nb\n", "a \nb", "file line 1 ends with 2 spaces, old block line 1 with 1 space (near line 1)"},
+		{"a line whose trailing whitespace matches is passed over", "a  \nb  \nc\n", "a  \nb\nc", "file line 2 ends with 2 spaces, old block line 2 with no trailing whitespace (near line 1)"},
+		{"tabs versus spaces", "x\n\tfoo\n\tbar\n", "  foo\n  bar", "file line 2 starts with 1 tab, old block line 1 with 2 spaces (near line 2)"},
+		{"indentation differs later in the block", "foo\n    bar\n", "foo\n  bar", "file line 2 starts with 4 spaces, old block line 2 with 2 spaces (near line 1)"},
+		{"mixed and none", "\t  foo\n  bar\n", "foo\nbar", "file line 1 starts with mixed tabs and spaces, old block line 1 with no indentation (near line 1)"},
+		{"several tabs", "\t\tfoo\n\t\tbar\n", "\tfoo\n\tbar", "file line 1 starts with 2 tabs, old block line 1 with 1 tab (near line 1)"},
+		{"whitespace hint reports every match", "\tfoo\nx\n\tfoo\n", "  foo", "file line 1 starts with 1 tab, old block line 1 with 2 spaces (near lines 1, 3)"},
+		{"inner spaces", "a  b\nc\n", "a b\nc", "file line 1 has 2 spaces where the old block has 1 space (near line 1)"},
+		{"inner tab versus space", "x\na\tb\n", "a b", "file line 2 has 1 tab where the old block has 1 space (near line 2)"},
+		{"inner difference later in the block", "x\na b\n", "x\na  b", "file line 2 has 1 space where the old block has 2 spaces (near line 1)"},
+		{"inner difference after an equal run", "a b  c\n", "a b c", "file line 1 has 2 spaces where the old block has 1 space (near line 1)"},
+		{"inner mixed run", "a \t b\n", "a b", "file line 1 has mixed tabs and spaces where the old block has 1 space (near line 1)"},
+		{"leading and inner together", "\ta  b\n", "  a b", "file line 1 has 1 tab where the old block has 2 spaces (near line 1)"},
 		{"inner whitespace cannot be absent on one side", "a b\n", "ab", ""},
-		{"CRLF and tabs", "build:\r\n\tgo build\r\n", "build:\n    go build", "near line 1: the file uses CRLF line endings; file line 2 starts with 1 tab, old block line 2 with 4 spaces"},
-		{"CRLF and trailing whitespace", "a \r\nb\r\n", "a\nb", "near line 1: the file uses CRLF line endings; file line 1 ends with 1 space, old block line 1 with no trailing whitespace"},
+		{"CRLF and tabs", "build:\r\n\tgo build\r\n", "build:\n    go build", "the file uses CRLF line endings; file line 2 starts with 1 tab, old block line 2 with 4 spaces (near line 1)"},
+		{"CRLF and trailing whitespace", "a \r\nb\r\n", "a\nb", "the file uses CRLF line endings; file line 1 ends with 1 space, old block line 1 with no trailing whitespace (near line 1)"},
 
-		{"run at the start of old", "x\na\nb\nc\nd\n", "a\nb\nC\nd", "near line 2: lines 1-2 of the old block match file lines 2-3; line 3 differs"},
-		{"run keeps the longest", "a\nb\nX\n\na\nb\nc\nX\n", "a\nb\nc\nd", "near line 5: lines 1-3 of the old block match file lines 5-7; line 4 differs"},
-		{"run keeps the earliest file place on a tie", "a\nb\nX\na\nb\nY\n", "a\nb\nc", "near line 1: lines 1-2 of the old block match file lines 1-2; line 3 differs"},
-		{"run line must match whole", "a\nb\ncd\n", "a\nb\nc\ne", "near line 1: lines 1-2 of the old block match file lines 1-2; line 3 differs"},
+		{"run at the start of old", "x\na\nb\nc\nd\n", "a\nb\nC\nd", "lines 1-2 of the old block match file lines 2-3; line 3 differs (near line 2)"},
+		{"run keeps the longest", "a\nb\nX\n\na\nb\nc\nX\n", "a\nb\nc\nd", "lines 1-3 of the old block match file lines 5-7; line 4 differs (near line 5)"},
+		{"run keeps the earliest file place on a tie", "a\nb\nX\na\nb\nY\n", "a\nb\nc", "lines 1-2 of the old block match file lines 1-2; line 3 differs (near line 1)"},
+		{"run line must match whole", "a\nb\ncd\n", "a\nb\nc\ne", "lines 1-2 of the old block match file lines 1-2; line 3 differs (near line 1)"},
 		{"run first line must match whole too", "xfoo\nbar\nbaz\n", "foo\nbar\nqux", ""},
-		{"run skips a first line that only ends a file line", "xa\nb\nX\na\nb\nY\n", "a\nb\nc", "near line 4: lines 1-2 of the old block match file lines 4-5; line 3 differs"},
-		{"run stops at end of file", "a\nb", "a\nb\nc", "near line 1: lines 1-2 of the old block match file lines 1-2; line 3 differs"},
-		{"run in a CRLF file", "a\r\nb\r\nX\r\n", "a\nb\nc", "near line 1: the file uses CRLF line endings; lines 1-2 of the old block match file lines 1-2; line 3 differs"},
+		{"run skips a first line that only ends a file line", "xa\nb\nX\na\nb\nY\n", "a\nb\nc", "lines 1-2 of the old block match file lines 4-5; line 3 differs (near line 4)"},
+		{"run stops at end of file", "a\nb", "a\nb\nc", "lines 1-2 of the old block match file lines 1-2; line 3 differs (near line 1)"},
+		{"run in a CRLF file", "a\r\nb\r\nX\r\n", "a\nb\nc", "the file uses CRLF line endings; lines 1-2 of the old block match file lines 1-2; line 3 differs (near line 1)"},
 		{"run of one line says nothing", "a\nx\n", "a\nb", ""},
 		{"run first line absent and nothing else in a row", "x\ny\n", "a\nb", ""},
 		{"single-line old has no run", "abc\n", "abd", ""},
-		{"run at the end of old: first line differs", "a\nb\nc\nd\n", "x\nb\nc\nd", "near line 2: lines 2-4 of the old block match file lines 2-4; line 1 differs"},
-		{"run in the middle of old", "p\nb\nc\nq\n", "a\nb\nc\nd", "near line 2: lines 2-3 of the old block match file lines 2-3; lines 1 and 4 differ"},
-		{"run in the middle of old with more lines after", "p\nb\nc\nq\nr\n", "a\nb\nc\nd\ne\nf", "near line 2: lines 2-3 of the old block match file lines 2-3; lines 1 and 4 differ"},
-		{"longer run later in old beats a shorter one at its start", "a\nX\nb\nc\nd\n", "a\nb\nc\nd\ne", "near line 3: lines 2-4 of the old block match file lines 3-5; lines 1 and 5 differ"},
-		{"earliest file place wins a tie even when later in old", "b\nc\nX\na\nb\nX\n", "a\nb\nc", "near line 1: lines 2-3 of the old block match file lines 1-2; line 1 differs"},
-		{"same file place, earliest old place wins", "a\nb\nX\n", "a\nb\nY\na\nb", "near line 1: lines 1-2 of the old block match file lines 1-2; line 3 differs"},
-		{"run near the top of the file with old lines before it", "b\nc\nX\n", "a\nb\nc\nd", "near line 1: lines 2-3 of the old block match file lines 1-2; lines 1 and 4 differ"},
+		{"run at the end of old: first line differs", "a\nb\nc\nd\n", "x\nb\nc\nd", "lines 2-4 of the old block match file lines 2-4; line 1 differs (near line 2)"},
+		{"run in the middle of old", "p\nb\nc\nq\n", "a\nb\nc\nd", "lines 2-3 of the old block match file lines 2-3; lines 1 and 4 differ (near line 2)"},
+		{"run in the middle of old with more lines after", "p\nb\nc\nq\nr\n", "a\nb\nc\nd\ne\nf", "lines 2-3 of the old block match file lines 2-3; lines 1 and 4 differ (near line 2)"},
+		{"longer run later in old beats a shorter one at its start", "a\nX\nb\nc\nd\n", "a\nb\nc\nd\ne", "lines 2-4 of the old block match file lines 3-5; lines 1 and 5 differ (near line 3)"},
+		{"earliest file place wins a tie even when later in old", "b\nc\nX\na\nb\nX\n", "a\nb\nc", "lines 2-3 of the old block match file lines 1-2; line 1 differs (near line 1)"},
+		{"same file place, earliest old place wins", "a\nb\nX\n", "a\nb\nY\na\nb", "lines 1-2 of the old block match file lines 1-2; line 3 differs (near line 1)"},
+		{"run near the top of the file with old lines before it", "b\nc\nX\n", "a\nb\nc\nd", "lines 2-3 of the old block match file lines 1-2; lines 1 and 4 differ (near line 1)"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

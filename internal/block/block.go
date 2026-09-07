@@ -30,39 +30,64 @@ var newline = []byte("\n")
 // is not sep, input with zero or several sep lines before that, an empty OLD
 // block, and identical blocks, since none of those can describe a
 // replacement.
+//
+// A rejection names what to do next whenever there is something to name. The
+// caller is usually an agent that wrote the heredoc it just sent, so the
+// message says which of its lines to change rather than only which rule was
+// broken. The separators are counted in full, closing line included, because
+// that is the number the caller can count in what it wrote; a count that
+// does not say where the input was cut is left out.
 func Split(input, sep []byte) (Blocks, error) {
+	if len(input) == 0 {
+		return Blocks{}, fmt.Errorf("no input on stdin; pass the old and new blocks as a heredoc (see --help)")
+	}
 	lines := bytes.Split(bytes.TrimSuffix(input, newline), newline)
 	last := len(lines) - 1
-	if !bytes.Equal(lines[last], sep) {
-		if n := nearlySep(lines, sep); n > 0 {
-			return Blocks{}, fmt.Errorf("line %d looks like %q but has trailing whitespace; closing %q line is missing after the new block", n, sep, sep)
-		}
-		return Blocks{}, fmt.Errorf("closing %q line is missing after the new block", sep)
-	}
 	at, hits := -1, 0
 	for i, line := range lines[:last] {
 		if bytes.Equal(line, sep) {
 			at, hits = i, hits+1
 		}
 	}
+	if !bytes.Equal(lines[last], sep) {
+		if n := nearlySep(lines, sep); n > 0 {
+			return Blocks{}, trailingWhitespace(n, sep)
+		}
+		// The shell cut the heredoc short. Which separators did arrive says
+		// where it was cut, and the terminator is the thing to change.
+		switch hits {
+		case 0:
+			return Blocks{}, fmt.Errorf("no %q line found; if a content line equals the heredoc terminator, use another terminator", sep)
+		case 1:
+			return Blocks{}, fmt.Errorf("input ended before the second %q line; if a content line equals the heredoc terminator, use another terminator", sep)
+		}
+		return Blocks{}, fmt.Errorf("input ended before the closing %q line; if a content line equals the heredoc terminator, use another terminator", sep)
+	}
 	switch {
 	case hits == 0:
 		if n := nearlySep(lines[:last], sep); n > 0 {
-			return Blocks{}, fmt.Errorf("line %d looks like %q but has trailing whitespace; no %q line between the old and new blocks", n, sep, sep)
+			return Blocks{}, trailingWhitespace(n, sep)
 		}
-		return Blocks{}, fmt.Errorf("found the closing %q line but no %q line between the old and new blocks (an empty new block still takes two %q lines after the old block)", sep, sep, sep)
+		return Blocks{}, fmt.Errorf("only one %q line; an empty new block still takes two %q lines after the old block", sep, sep)
 	case hits > 1:
-		return Blocks{}, fmt.Errorf("expected one %q line between the old and new blocks, found %d", sep, hits)
+		return Blocks{}, fmt.Errorf("found %d %q lines, expected 2; if a content line equals %q, pass -d SEP and use SEP as the separator", hits+1, sep, sep)
 	}
 	oldText := bytes.Join(lines[:at], newline)
 	newText := bytes.Join(lines[at+1:last], newline)
 	if len(oldText) == 0 {
-		return Blocks{}, fmt.Errorf("old block is empty")
+		return Blocks{}, fmt.Errorf("old block is empty; put at least one line before the first %q line", sep)
 	}
 	if bytes.Equal(oldText, newText) {
 		return Blocks{}, fmt.Errorf("old and new blocks are identical")
 	}
 	return Blocks{Old: oldText, New: newText}, nil
+}
+
+// trailingWhitespace names a line that was meant to be a separator. The line
+// number is what the caller needs; the rest of the input is described by
+// whichever check called this.
+func trailingWhitespace(n int, sep []byte) error {
+	return fmt.Errorf("line %d looks like %q but has trailing whitespace; remove the spaces or tabs after it", n, sep)
 }
 
 // nearlySep returns the 1-based number of the first line that is sep with

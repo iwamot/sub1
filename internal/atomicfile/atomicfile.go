@@ -42,12 +42,14 @@ func WriteFile(path string, data []byte) error {
 	tmp, err := os.CreateTemp(dir, ".sub1-*")
 	if err != nil {
 		// The temporary file's name means nothing to the caller; point at
-		// the directory, which is what needs write permission.
+		// the directory, which is what needs write permission. The file
+		// being replaced is named by the caller, which puts it in front of
+		// every file error alike.
 		var pe *fs.PathError
 		if errors.As(err, &pe) {
 			err = pe.Err
 		}
-		return fmt.Errorf("%s: cannot create a temporary file in %s: %w", path, dir, err)
+		return fmt.Errorf("cannot create a temporary file in %s: %w", dir, err)
 	}
 	tmpName := tmp.Name()
 	committed := false

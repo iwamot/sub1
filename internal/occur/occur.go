@@ -163,12 +163,36 @@ func matches(n int, singular, plural string) string {
 // number of times than expected. The lines are included so that the caller
 // can decide which occurrences to widen the block around, or how many to
 // expect, without reading the file again.
-func Mismatch(path string, lines []int, expected int) string {
+//
+// It ends with what to do next, unless a hint line follows: the hint says
+// more about a block that was not found at all than any general suggestion
+// could, so hinted drops the tail.
+func Mismatch(path string, lines []int, expected int, hinted bool) string {
 	where := ""
 	if len(lines) > 0 {
 		where = " (" + lineList(lines) + ")"
 	}
-	return fmt.Sprintf("%s: old block found %s%s, expected %d", path, times(len(lines)), where, expected)
+	return fmt.Sprintf("%s: old block found %s%s, expected %d%s",
+		path, times(len(lines)), where, expected, remedy(len(lines), expected, hinted))
+}
+
+// remedy names the way out of a count mismatch, with the count that was
+// found filled in so that the caller can use it as it stands. More
+// occurrences than expected are cut down by adding context to the old block;
+// fewer are not, so there the count is the thing to accept or the block the
+// thing to fix. A block that was not found at all has nothing to widen, and
+// is either described by the hint that follows or read again from the file.
+func remedy(found, expected int, hinted bool) string {
+	switch {
+	case found == 0 && hinted:
+		return ""
+	case found == 0:
+		return "; no similar text found, read the file again"
+	case found > expected:
+		return fmt.Sprintf("; widen the old block, or pass -n %d", found)
+	default:
+		return fmt.Sprintf("; pass -n %d, or read the file again", found)
+	}
 }
 
 // Hint guesses why old, which does not occur in content, was expected to.
@@ -181,6 +205,12 @@ func Mismatch(path string, lines []int, expected int) string {
 // in a row in the file is reported, along with the line next to that run
 // that must differ. The hint is only a lead: the count in the Mismatch line
 // is what decided that nothing was replaced.
+//
+// The caller prints it under a "hint:" label. What to change comes first and
+// where it is goes in a trailing "(near ...)", because that is the order the
+// caller reads in, and because a list of line numbers in front of the text
+// runs into it: "near lines 1, 3, file line 1 starts with" hides where the
+// list ends.
 func Hint(content, old []byte) string {
 	// CRLF line endings are folded away on the file side only, and stated
 	// first when present. A file with CRLF usually differs in something else
@@ -205,13 +235,16 @@ func Hint(content, old []byte) string {
 		if n.describe != nil {
 			notes = append(notes, n.describe(content, old, lines[0]))
 		}
-		return fmt.Sprintf("near %s: %s", lineList(lines), strings.Join(notes, "; "))
+		// The identity normalization has nothing of its own to say, and it
+		// only matches at all when the line endings were folded above, which
+		// leaves a note behind: old does not occur in content as it stands.
+		return fmt.Sprintf("%s (near %s)", strings.Join(notes, "; "), lineList(lines))
 	}
 	line, note := runHint(content, old)
 	if line == 0 {
 		return ""
 	}
-	return fmt.Sprintf("near line %d: %s", line, strings.Join(append(notes, note), "; "))
+	return fmt.Sprintf("%s (near line %d)", strings.Join(append(notes, note), "; "), line)
 }
 
 // A normalization erases one kind of whitespace difference. It must keep the
