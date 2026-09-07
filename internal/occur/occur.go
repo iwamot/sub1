@@ -236,23 +236,35 @@ func trailingWhitespace(b []byte) []byte {
 	return mapLines(b, func(line []byte) []byte { return bytes.TrimRight(line, " \t") })
 }
 
-// describeTrailingWhitespace names the first line, in old and then in the
-// matched region of content, that carries trailing whitespace. One of them
-// must, or the blocks would have matched as they are.
+// describeTrailingWhitespace compares what old and the matched region of
+// content carry at the end of each line and reports the first pair that
+// differs. One pair must, or the blocks would have matched as they are.
+//
+// Both sides are named, as the leading and inner descriptions do. Stopping
+// at the first line that merely has trailing whitespace would name a line
+// that carries the same whitespace on both sides and so matches, and naming
+// one side alone reads as if the other end were bare when both carry
+// whitespace and only the amount differs.
 func describeTrailingWhitespace(content, old []byte, line int) string {
 	oldLines, fileLines := region(content, old, line)
 	i := 0
-	for i+1 < len(oldLines) && !hasTrailing(oldLines[i]) && !hasTrailing(fileLines[i]) {
+	for i+1 < len(oldLines) && bytes.Equal(trailing(fileLines[i]), trailing(oldLines[i])) {
 		i++
 	}
-	if hasTrailing(oldLines[i]) {
-		return fmt.Sprintf("old block line %d has trailing whitespace", i+1)
-	}
-	return fmt.Sprintf("file line %d has trailing whitespace", line+i)
+	return fmt.Sprintf("file line %d ends with %s, old block line %d with %s",
+		line+i, describeTrailing(trailing(fileLines[i])), i+1, describeTrailing(trailing(oldLines[i])))
 }
 
-func hasTrailing(line []byte) bool {
-	return len(bytes.TrimRight(line, " \t")) != len(line)
+// trailing returns the run of spaces and tabs at the end of line.
+func trailing(line []byte) []byte {
+	return line[len(bytes.TrimRight(line, " \t")):]
+}
+
+func describeTrailing(ws []byte) string {
+	if len(ws) == 0 {
+		return "no trailing whitespace"
+	}
+	return describeRun(ws)
 }
 
 func leadingWhitespace(b []byte) []byte {
