@@ -29,6 +29,8 @@ A Python one-off that reads the file, asserts the old text occurs once, replaces
 
 `sub1` is that script, made into a command.
 
+An agent with a dedicated editing tool already has its own way to do this, and has little use for `sub1`. It is for the ones that reach for the shell instead, because that is all they have or because that is what they were told to do.
+
 ## Setup
 
 Install it where the agent runs:
@@ -61,6 +63,8 @@ The file is rewritten only when the old block occurs exactly once. Otherwise not
 ```
 
 That paragraph is all the agent needs; everything else it has to know arrives in the output of the call that needed it. `sub1 --instructions` prints the same paragraph, for setup scripts and machines where this page is not at hand.
+
+One thing to check before you rely on your agent's permission rules: `sub1` opens the file itself, the way a one-off script does. A rule or a hook that works by matching the agent's own editing tool will not see an edit made through `sub1`. One that matches the shell command will, and enforcement at the operating-system level, such as a sandbox, covers it either way. Find out which kind guards the paths you care about before you count on it.
 
 ## What the agent sees
 
