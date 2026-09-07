@@ -34,6 +34,9 @@ func Split(input, sep []byte) (Blocks, error) {
 	lines := bytes.Split(bytes.TrimSuffix(input, newline), newline)
 	last := len(lines) - 1
 	if !bytes.Equal(lines[last], sep) {
+		if n := nearlySep(lines, sep); n > 0 {
+			return Blocks{}, fmt.Errorf("line %d looks like %q but has trailing whitespace; closing %q line is missing after the new block", n, sep, sep)
+		}
 		return Blocks{}, fmt.Errorf("closing %q line is missing after the new block", sep)
 	}
 	at, hits := -1, 0
@@ -44,6 +47,9 @@ func Split(input, sep []byte) (Blocks, error) {
 	}
 	switch {
 	case hits == 0:
+		if n := nearlySep(lines[:last], sep); n > 0 {
+			return Blocks{}, fmt.Errorf("line %d looks like %q but has trailing whitespace; no %q line between the old and new blocks", n, sep, sep)
+		}
 		return Blocks{}, fmt.Errorf("found the closing %q line but no %q line between the old and new blocks (an empty new block still takes two %q lines after the old block)", sep, sep, sep)
 	case hits > 1:
 		return Blocks{}, fmt.Errorf("expected one %q line between the old and new blocks, found %d", sep, hits)
@@ -57,4 +63,17 @@ func Split(input, sep []byte) (Blocks, error) {
 		return Blocks{}, fmt.Errorf("old and new blocks are identical")
 	}
 	return Blocks{Old: oldText, New: newText}, nil
+}
+
+// nearlySep returns the 1-based number of the first line that is sep with
+// trailing spaces or tabs, or 0. Such a line is a separator that was meant
+// to be one, and the caller names it rather than reporting the separator as
+// missing.
+func nearlySep(lines [][]byte, sep []byte) int {
+	for i, line := range lines {
+		if !bytes.Equal(line, sep) && bytes.Equal(bytes.TrimRight(line, " \t"), sep) {
+			return i + 1
+		}
+	}
+	return 0
 }

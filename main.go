@@ -237,10 +237,11 @@ func run(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "sub1:", err)
 		return exitUsage
 	}
-	summary := occur.Summary(a.path, lines)
+	var notes []string
 	if asCRLF {
-		summary += " (CRLF)"
+		notes = append(notes, "CRLF")
 	}
-	fmt.Fprintln(stdout, summary)
+	notes = append(notes, occur.Notes(content, old, new)...)
+	fmt.Fprintln(stdout, occur.Summary(a.path, lines, notes))
 	return exitOK
 }

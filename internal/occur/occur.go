@@ -81,8 +81,82 @@ func offsets(content, old []byte) []int {
 }
 
 // Summary is the one-line report printed after a successful replacement.
-func Summary(path string, lines []int) string {
-	return fmt.Sprintf("%s: replaced at %s", path, lineList(lines))
+// The notes, if any, follow in parentheses.
+func Summary(path string, lines []int, notes []string) string {
+	s := fmt.Sprintf("%s: replaced at %s", path, lineList(lines))
+	if len(notes) > 0 {
+		s += " (" + strings.Join(notes, "; ") + ")"
+	}
+	return s
+}
+
+// Notes states what about a replacement that is about to be made could be
+// other than what a block written as lines was meant to do. Matching is
+// byte-exact, so an occurrence can start or end inside a line, and each
+// note is a fact about where the occurrences sit, not a verdict: renaming
+// an identifier at its call sites matches inside lines on purpose. The
+// notes are printed so that a caller can check the edit, and so that how
+// often each kind is meant can be counted from the output. Every
+// occurrence is judged against the original content, as Replace does.
+//
+// The notes, in the order they are given:
+//
+//   - An occurrence starts inside an identifier: the byte before it and the
+//     first byte of old are both identifier characters (ASCII letters,
+//     digits, and underscore), as when old "x = 1" is found in "max = 1".
+//   - An occurrence ends inside an identifier: the byte after it and the
+//     last byte of old are both identifier characters, as when old
+//     "return" is found in "returned".
+//   - An occurrence starts in the middle of a line and new has several
+//     lines: the lines of new after the first are inserted with the
+//     indentation they were written with, not the one the file has at the
+//     occurrence, as when old "return 1" without indentation is found in
+//     an indented line.
+//   - The file already contained new: new contains old and content contains
+//     new, so the occurrence sits inside a copy of new that is already
+//     there, and replacing it repeats the rest of new. This is what a second
+//     run of the same edit looks like.
+func Notes(content, old, new []byte) []string {
+	startsInside, endsInside, midLine := 0, 0, 0
+	multiLine := bytes.Contains(new, newline)
+	for _, i := range offsets(content, old) {
+		end := i + len(old)
+		if i > 0 && isIdent(content[i-1]) && isIdent(old[0]) {
+			startsInside++
+		}
+		if end < len(content) && isIdent(content[end]) && isIdent(old[len(old)-1]) {
+			endsInside++
+		}
+		if i > 0 && content[i-1] != '\n' && multiLine {
+			midLine++
+		}
+	}
+	var notes []string
+	if startsInside > 0 {
+		notes = append(notes, matches(startsInside, "starts", "start")+" inside an identifier")
+	}
+	if endsInside > 0 {
+		notes = append(notes, matches(endsInside, "ends", "end")+" inside an identifier")
+	}
+	if midLine > 0 {
+		notes = append(notes, matches(midLine, "starts", "start")+" mid-line with a multi-line new block")
+	}
+	if bytes.Contains(new, old) && bytes.Contains(content, new) {
+		notes = append(notes, "the file already contained the new block")
+	}
+	return notes
+}
+
+func isIdent(c byte) bool {
+	return c == '_' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
+}
+
+// matches counts occurrences with a verb: "1 match starts", "2 matches start".
+func matches(n int, singular, plural string) string {
+	if n == 1 {
+		return "1 match " + singular
+	}
+	return fmt.Sprintf("%d matches %s", n, plural)
 }
 
 // Mismatch is the one-line report printed when old was found a different
