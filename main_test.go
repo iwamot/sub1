@@ -455,6 +455,27 @@ func TestRun_missingFile(t *testing.T) {
 	}
 }
 
+// A file that cannot be read and one that cannot be written fail with the
+// same words from the OS, so each names its own operation.
+func TestRun_unreadableFile(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores file permissions")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.txt")
+	if err := os.WriteFile(path, []byte("x\n"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	r := runWith([]string{path}, "x\n====\ny\n====\n")
+	if r.code != exitFile {
+		t.Errorf("exit = %d, want 3 (stderr: %q)", r.code, r.stderr)
+	}
+	want := "sub1: " + path + ": cannot read the file: permission denied\n"
+	if r.stderr != want {
+		t.Errorf("stderr = %q, want %q", r.stderr, want)
+	}
+}
+
 func TestRun_unwritableFile(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores directory permissions")
@@ -468,7 +489,8 @@ func TestRun_unwritableFile(t *testing.T) {
 	if r.code != exitFile {
 		t.Errorf("exit = %d, want 3 (stderr: %q)", r.code, r.stderr)
 	}
-	if want := "sub1: " + path + ": permission denied\n"; r.stderr != want {
+	want := "sub1: " + path + ": cannot write the file: permission denied; make it writable, or edit a copy\n"
+	if r.stderr != want {
 		t.Errorf("stderr = %q, want %q", r.stderr, want)
 	}
 }
@@ -493,7 +515,7 @@ func TestRun_unwritableDirNamesTheFile(t *testing.T) {
 	if r.code != exitFile {
 		t.Errorf("exit = %d, want 3 (stderr: %q)", r.code, r.stderr)
 	}
-	want := "sub1: " + path + ": cannot create a temporary file in " + dir + ": permission denied\n"
+	want := "sub1: " + path + ": cannot create a temporary file in " + dir + ": permission denied; make the directory writable\n"
 	if r.stderr != want {
 		t.Errorf("stderr = %q, want %q", r.stderr, want)
 	}

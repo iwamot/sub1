@@ -1,10 +1,19 @@
 package atomicfile
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+// An error that carries no path of its own is passed through as it is.
+func TestBareLeavesAPlainError(t *testing.T) {
+	err := errors.New("plain")
+	if got := bare(err); got != err {
+		t.Errorf("bare(%v) = %v, want the error itself", err, got)
+	}
+}
 
 // assertNoTempFiles fails if a temporary file was left behind in dir.
 func assertNoTempFiles(t *testing.T, dir string) {
@@ -105,7 +114,7 @@ func TestWriteFileUnwritableDir(t *testing.T) {
 	}
 	// The caller puts the file's name in front; WriteFile names only the
 	// directory, which is what needs write permission.
-	want := "cannot create a temporary file in " + dir + ": permission denied"
+	want := "cannot create a temporary file in " + dir + ": permission denied; make the directory writable"
 	if err.Error() != want {
 		t.Errorf("error = %q, want %q", err, want)
 	}

@@ -96,12 +96,13 @@ Exit codes:
 // instructionsText is the paragraph a coding agent needs in order to use
 // sub1: that it exists, when to reach for it, and the shape of the call.
 //
-// What to do when a call fails is not here. Every message sub1 prints ends
-// with the way out, so the same advice in the instruction file would be a
-// second copy to keep in step, read on every call to cover the calls that
-// fail. The one thing left is that the file is only rewritten on an exact
-// match, which never shows up in a message because it is what happens when
-// nothing goes wrong.
+// What to do when a call fails is not here. Wherever there is a way out,
+// the message that reports the failure carries it, so the same advice in the
+// instruction file would be a second copy to keep in step, read on every
+// call to cover the calls that fail. A message with no such tail is one
+// nothing can be suggested for — a file that is not there. The one thing
+// left is that the file is only rewritten on an exact match, which never
+// shows up in a message because it is what happens when nothing goes wrong.
 //
 // README.md quotes this paragraph verbatim.
 const instructionsText = "To replace part of a file from the shell, use `sub1` instead of sed or an ad-hoc script:\n" +
@@ -114,6 +115,10 @@ const instructionsText = "To replace part of a file from the shell, use `sub1` i
 	"    SUB1\n" +
 	"\n" +
 	"The file is rewritten only when the old block occurs exactly once. Otherwise nothing is written and the message says what to do next. See `sub1 --help` for options.\n"
+
+// errMultipleFiles is worded once because parseArgs reaches it from both
+// sides of "--".
+var errMultipleFiles = fmt.Errorf("multiple files given; sub1 edits one file per call")
 
 type cliArgs struct {
 	showHelp         bool
@@ -133,7 +138,7 @@ func parseArgs(argv []string) (cliArgs, error) {
 			// with "-".
 			for _, arg := range argv[i+1:] {
 				if a.path != "" {
-					return cliArgs{}, fmt.Errorf("multiple files given")
+					return cliArgs{}, errMultipleFiles
 				}
 				a.path = arg
 			}
@@ -166,16 +171,16 @@ func parseArgs(argv []string) (cliArgs, error) {
 			a.expected = n
 		default:
 			if strings.HasPrefix(arg, "-") {
-				return cliArgs{}, fmt.Errorf("unknown flag: %s", arg)
+				return cliArgs{}, fmt.Errorf("unknown flag: %s; see --help for the flags", arg)
 			}
 			if a.path != "" {
-				return cliArgs{}, fmt.Errorf("multiple files given")
+				return cliArgs{}, errMultipleFiles
 			}
 			a.path = arg
 		}
 	}
 	if a.path == "" && !a.showHelp && !a.showVersion && !a.showInstructions {
-		return cliArgs{}, fmt.Errorf("no file given")
+		return cliArgs{}, fmt.Errorf("no file given; pass the file to edit as the last argument")
 	}
 	return a, nil
 }
@@ -223,16 +228,21 @@ func isTerminal(r io.Reader) bool {
 }
 
 // fileError words a file error as "FILE: what", with FILE the path as it was
-// given on the command line. The os errors name a path of their own — the
-// symlink target, or the directory the temporary file goes in — and lead
-// with the operation that failed ("open", "lstat"), which says more about
-// how sub1 is built than about what the caller has to fix.
+// given on the command line.
 func fileError(path string, err error) error {
+	return fmt.Errorf("%s: %w", path, bare(err))
+}
+
+// bare strips the wrapping the os errors come in. They name a path of their
+// own — the symlink target, or the directory the temporary file goes in —
+// and lead with the operation that failed ("open", "lstat"), which says more
+// about how sub1 is built than about what the caller has to fix.
+func bare(err error) error {
 	var pe *fs.PathError
 	if errors.As(err, &pe) {
-		err = pe.Err
+		return pe.Err
 	}
-	return fmt.Errorf("%s: %w", path, err)
+	return err
 }
 
 func main() {
@@ -279,6 +289,13 @@ func run(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 
 	content, err := os.ReadFile(a.path)
 	if err != nil {
+		// A file that is there but cannot be read fails with the same words
+		// as one that cannot be written, so this one names the operation.
+		// The other read failures — no such file, a directory — say what is
+		// wrong on their own, and naming the operation would only pad them.
+		if errors.Is(err, fs.ErrPermission) {
+			err = fmt.Errorf("cannot read the file: %w", bare(err))
+		}
 		fmt.Fprintln(stderr, "sub1:", fileError(a.path, err))
 		return exitFile
 	}
