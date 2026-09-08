@@ -53,15 +53,22 @@ func Split(input, sep []byte) (Blocks, error) {
 		if n := nearlySep(lines, sep); n > 0 {
 			return Blocks{}, trailingWhitespace(n, sep)
 		}
-		// The shell cut the heredoc short. Which separators did arrive says
-		// where it was cut, and the terminator is the thing to change.
+		// Fewer than two separators means the shell cut the heredoc short,
+		// and which ones did arrive says where. Exactly two is the other
+		// story: the closing separator is there and text follows it, which
+		// a cut input cannot look like, since a cut takes lines off the end.
 		switch hits {
 		case 0:
 			return Blocks{}, fmt.Errorf("no %q line found; if a content line equals the heredoc terminator, use another terminator", sep)
 		case 1:
 			return Blocks{}, fmt.Errorf("input ended before the second %q line; if a content line equals the heredoc terminator, use another terminator", sep)
+		case 2:
+			return Blocks{}, fmt.Errorf("content after the closing %q line; remove the %s after it", sep, plural(last-at, "line"))
 		}
-		return Blocks{}, fmt.Errorf("input ended before the closing %q line; if a content line equals the heredoc terminator, use another terminator", sep)
+		// Past two, which separator was the closing one cannot be told, so
+		// the count is what to report, the same as for an input that does
+		// end with one.
+		return Blocks{}, tooManySeparators(hits, sep)
 	}
 	switch {
 	case hits == 0:
@@ -70,7 +77,7 @@ func Split(input, sep []byte) (Blocks, error) {
 		}
 		return Blocks{}, fmt.Errorf("only one %q line; an empty new block still takes two %q lines after the old block", sep, sep)
 	case hits > 1:
-		return Blocks{}, fmt.Errorf("found %d %q lines, expected 2; if a content line equals %q, pass -d SEP and use SEP as the separator", hits+1, sep, sep)
+		return Blocks{}, tooManySeparators(hits+1, sep)
 	}
 	oldText := bytes.Join(lines[:at], newline)
 	newText := bytes.Join(lines[at+1:last], newline)
@@ -88,6 +95,21 @@ func Split(input, sep []byte) (Blocks, error) {
 // whichever check called this.
 func trailingWhitespace(n int, sep []byte) error {
 	return fmt.Errorf("line %d looks like %q but has trailing whitespace; remove the spaces or tabs after it", n, sep)
+}
+
+// tooManySeparators reports an input holding more separator lines than the
+// grammar has places for. The count is n, the closing line included when the
+// input has one.
+func tooManySeparators(n int, sep []byte) error {
+	return fmt.Errorf("found %d %q lines, expected 2; if a content line equals %q, pass -d SEP and use SEP as the separator", n, sep, sep)
+}
+
+// plural writes a count with its noun, as "1 line" or "3 lines".
+func plural(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
 }
 
 // nearlySep returns the 1-based number of the first line that is sep with

@@ -124,10 +124,30 @@ func TestSplit(t *testing.T) {
 			wantErr: "identical",
 		},
 		{
-			name:    "shell cut the heredoc after the second separator",
+			name:    "a line after the closing separator",
 			input:   "a\n====\nb\n====\nc\n",
 			sep:     sep,
-			wantErr: "input ended before the closing \"====\" line; if a content line equals",
+			wantErr: "content after the closing \"====\" line; remove the 1 line after it",
+		},
+		{
+			name:    "a blank line after the closing separator",
+			input:   "a\n====\nb\n====\n\n",
+			sep:     sep,
+			wantErr: "content after the closing \"====\" line; remove the 1 line after it",
+		},
+		{
+			name:    "several lines after the closing separator",
+			input:   "a\n====\nb\n====\nc\nd\n",
+			sep:     sep,
+			wantErr: "content after the closing \"====\" line; remove the 2 lines after it",
+		},
+		{
+			// Past two separators the closing one cannot be picked out, so
+			// the count is reported whether or not the input ends with one.
+			name:    "three separators and a line after them",
+			input:   "a\n====\nb\n====\nc\n====\nd\n",
+			sep:     sep,
+			wantErr: "found 3 \"====\" lines, expected 2",
 		},
 		{
 			name:    "empty input",
