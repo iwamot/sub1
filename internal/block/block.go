@@ -16,6 +16,7 @@ package block
 import (
 	"bytes"
 	"fmt"
+	"unicode/utf8"
 )
 
 // Blocks holds the text to find and the text to put in its place.
@@ -37,6 +38,12 @@ var newline = []byte("\n")
 // broken. The separators are counted in full, closing line included, because
 // that is the number the caller can count in what it wrote; a count that
 // does not say where the input was cut is left out.
+//
+// Several separators are refused rather than divided up. Which of them the
+// caller meant as text cannot be told, and a count that happens to divide
+// evenly would still be a guess at where the blocks end. Naming a separator
+// the input does not hold is a different matter: that needs the lines, not
+// a split.
 func Split(input, sep []byte) (Blocks, error) {
 	if len(input) == 0 {
 		return Blocks{}, fmt.Errorf("no input on stdin; pass the old and new blocks as a heredoc (see --help)")
@@ -68,7 +75,7 @@ func Split(input, sep []byte) (Blocks, error) {
 		// Past two, which separator was the closing one cannot be told, so
 		// the count is what to report, the same as for an input that does
 		// end with one.
-		return Blocks{}, tooManySeparators(hits, sep)
+		return Blocks{}, tooManySeparators(hits, lines, sep)
 	}
 	switch {
 	case hits == 0:
@@ -77,7 +84,7 @@ func Split(input, sep []byte) (Blocks, error) {
 		}
 		return Blocks{}, fmt.Errorf("only one %q line; an empty new block still takes two %q lines after the old block", sep, sep)
 	case hits > 1:
-		return Blocks{}, tooManySeparators(hits+1, sep)
+		return Blocks{}, tooManySeparators(hits+1, lines, sep)
 	}
 	oldText := bytes.Join(lines[:at], newline)
 	newText := bytes.Join(lines[at+1:last], newline)
@@ -99,9 +106,48 @@ func trailingWhitespace(n int, sep []byte) error {
 
 // tooManySeparators reports an input holding more separator lines than the
 // grammar has places for. The count is n, the closing line included when the
-// input has one.
-func tooManySeparators(n int, sep []byte) error {
-	return fmt.Errorf("found %d %q lines, expected 2; if a content line equals %q, pass -d SEP and use SEP as the separator", n, sep, sep)
+// input has one. The separator to move to is named outright, since the
+// caller would otherwise have to pick one and check it against its own text.
+func tooManySeparators(n int, lines [][]byte, sep []byte) error {
+	free := freeSeparator(lines, sep)
+	return fmt.Errorf("found %d %q lines, expected 2; a content line equals %q, so pass -d '%s' and write %s on both separator lines", n, sep, sep, free, free)
+}
+
+// freeSeparator returns a separator that no line of input equals, so the
+// caller can paste it into -d without checking anything first. Every line is
+// a candidate to collide with, the current separator included: the blocks
+// are not split at this point, and cannot be, which is why the input was
+// rejected in the first place.
+//
+// The three fixed candidates come first because they read as separators. If
+// the input holds all of them, the current separator grows by its own last
+// character, which ends because no line can equal one longer than itself.
+// The character is taken as a rune, so that a separator such as "——" grows
+// into valid UTF-8 rather than into a broken encoding of it.
+func freeSeparator(lines [][]byte, sep []byte) []byte {
+	for _, c := range [][]byte{[]byte("%%%%"), []byte("@@@@"), []byte("####")} {
+		if !holds(lines, c) {
+			return c
+		}
+	}
+	_, size := utf8.DecodeLastRune(sep)
+	tail := sep[len(sep)-size:]
+	for n := 1; ; n++ {
+		grown := append(append([]byte{}, sep...), bytes.Repeat(tail, n)...)
+		if !holds(lines, grown) {
+			return grown
+		}
+	}
+}
+
+// holds reports whether any line is exactly s.
+func holds(lines [][]byte, s []byte) bool {
+	for _, line := range lines {
+		if bytes.Equal(line, s) {
+			return true
+		}
+	}
+	return false
 }
 
 // plural writes a count with its noun, as "1 line" or "3 lines".

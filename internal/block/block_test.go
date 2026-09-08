@@ -103,7 +103,27 @@ func TestSplit(t *testing.T) {
 			name:    "two separators before the closing one",
 			input:   "a\n====\nb\n====\nc\n====\n",
 			sep:     sep,
-			wantErr: "found 3 \"====\" lines, expected 2; if a content line equals \"====\", pass -d SEP",
+			wantErr: "found 3 \"====\" lines, expected 2; a content line equals \"====\", so pass -d '%%%%' and write %%%% on both separator lines",
+		},
+		{
+			name:    "the named separator skips the ones the input already holds",
+			input:   "a\n====\n%%%%\n@@@@\n####\nb\n====\nc\n====\n",
+			sep:     sep,
+			wantErr: "pass -d '=====' and write ===== on both separator lines",
+		},
+		{
+			name:    "the named separator grows until the input does not hold it",
+			input:   "a\n====\n%%%%\n@@@@\n####\n=====\nb\n====\nc\n====\n",
+			sep:     sep,
+			wantErr: "pass -d '======' and write ====== on both separator lines",
+		},
+		{
+			// The separator grows by a whole rune, so a multi-byte one does
+			// not come back as a broken encoding of itself.
+			name:    "a multi-byte separator grows into valid UTF-8",
+			input:   "a\n——\n%%%%\n@@@@\n####\nb\n——\nc\n——\n",
+			sep:     []byte("——"),
+			wantErr: "pass -d '———' and write ——— on both separator lines",
 		},
 		{
 			name:    "closing separator alone",
@@ -147,7 +167,7 @@ func TestSplit(t *testing.T) {
 			name:    "three separators and a line after them",
 			input:   "a\n====\nb\n====\nc\n====\nd\n",
 			sep:     sep,
-			wantErr: "found 3 \"====\" lines, expected 2",
+			wantErr: "found 3 \"====\" lines, expected 2; a content line equals \"====\", so pass -d '%%%%' and write %%%% on both separator lines",
 		},
 		{
 			name:    "empty input",

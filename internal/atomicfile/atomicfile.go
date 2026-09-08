@@ -14,6 +14,16 @@ import (
 // permission bits plus setuid, setgid, and sticky.
 const modeBits = os.ModePerm | os.ModeSetuid | os.ModeSetgid | os.ModeSticky
 
+// bare strips the wrapping the os errors come in, which names a path of its
+// own and leads with the operation that failed.
+func bare(err error) error {
+	var pe *fs.PathError
+	if errors.As(err, &pe) {
+		return pe.Err
+	}
+	return err
+}
+
 // WriteFile writes data to path by way of a temporary file in the same
 // directory, then renames it into place. Either the old contents or the new
 // contents are visible at path; never a mix. The file's mode is preserved.
@@ -34,7 +44,15 @@ func WriteFile(path string, data []byte) error {
 	// write stays as it is.
 	f, err := os.OpenFile(real, os.O_WRONLY, 0)
 	if err != nil {
-		return err
+		// The read has already succeeded by the time this runs, so naming
+		// the operation tells this apart from a file that could not be read,
+		// which fails with the same words. Which way out to take is the
+		// caller's to choose, so both are named.
+		tail := ""
+		if errors.Is(err, fs.ErrPermission) {
+			tail = "; make it writable, or edit a copy"
+		}
+		return fmt.Errorf("cannot write the file: %w%s", bare(err), tail)
 	}
 	f.Close()
 	dir := filepath.Dir(real)
@@ -44,12 +62,13 @@ func WriteFile(path string, data []byte) error {
 		// The temporary file's name means nothing to the caller; point at
 		// the directory, which is what needs write permission. The file
 		// being replaced is named by the caller, which puts it in front of
-		// every file error alike.
-		var pe *fs.PathError
-		if errors.As(err, &pe) {
-			err = pe.Err
+		// every file error alike. The way out is the directory's mode, not
+		// the file's, which is why it differs from the one above.
+		tail := ""
+		if errors.Is(err, fs.ErrPermission) {
+			tail = "; make the directory writable"
 		}
-		return fmt.Errorf("cannot create a temporary file in %s: %w", dir, err)
+		return fmt.Errorf("cannot create a temporary file in %s: %w%s", dir, bare(err), tail)
 	}
 	tmpName := tmp.Name()
 	committed := false
