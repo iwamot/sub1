@@ -17,8 +17,7 @@ const modeBits = os.ModePerm | os.ModeSetuid | os.ModeSetgid | os.ModeSticky
 // bare strips the wrapping the os errors come in, which names a path of its
 // own and leads with the operation that failed.
 func bare(err error) error {
-	var pe *fs.PathError
-	if errors.As(err, &pe) {
+	if pe, ok := errors.AsType[*fs.PathError](err); ok {
 		return pe.Err
 	}
 	return err
