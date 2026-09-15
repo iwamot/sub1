@@ -57,8 +57,7 @@ func runCmd(t *testing.T, cmd *exec.Cmd) result {
 	if err == nil {
 		return result{stdout: so.String(), stderr: se.String(), exitCode: 0}
 	}
-	var ee *exec.ExitError
-	if errors.As(err, &ee) {
+	if ee, ok := errors.AsType[*exec.ExitError](err); ok {
 		return result{stdout: so.String(), stderr: se.String(), exitCode: ee.ExitCode()}
 	}
 	t.Fatalf("run %v: %v", cmd.Args, err)
@@ -183,11 +182,11 @@ func readmeBlock(t *testing.T, opening string) string {
 		t.Fatalf("README.md has no %q block", opening)
 	}
 	rest := string(readme)[start+len(marker):]
-	end := strings.Index(rest, "```")
-	if end < 0 {
+	before, _, ok := strings.Cut(rest, "```")
+	if !ok {
 		t.Fatalf("README.md %q block is not closed", opening)
 	}
-	return rest[:end]
+	return before
 }
 
 // The README quotes --help verbatim; keep the two from drifting apart.

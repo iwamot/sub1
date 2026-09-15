@@ -238,8 +238,7 @@ func fileError(path string, err error) error {
 // and lead with the operation that failed ("open", "lstat"), which says more
 // about how sub1 is built than about what the caller has to fix.
 func bare(err error) error {
-	var pe *fs.PathError
-	if errors.As(err, &pe) {
+	if pe, ok := errors.AsType[*fs.PathError](err); ok {
 		return pe.Err
 	}
 	return err
