@@ -1,6 +1,7 @@
 package occur
 
 import (
+	"bytes"
 	"reflect"
 	"testing"
 )
@@ -74,6 +75,49 @@ func TestReplace(t *testing.T) {
 	}
 }
 
+func TestMask(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		old     string
+		want    string
+	}{
+		{"nothing to mask", "a\nb\n", "z", "a\nb\n"},
+		{"one occurrence", "a\nb\n", "b", "a\n\x00\n"},
+		{"line breaks inside an occurrence are kept", "a\nb\nc\n", "a\nb", "\x00\n\x00\nc\n"},
+		{"CRLF inside an occurrence is kept", "a\r\nb\r\n", "a\r\nb", "\x00\r\n\x00\r\n"},
+		{"every occurrence", "x\ny\nx\n", "x", "\x00\ny\n\x00\n"},
+		{"part of a line", "foo bar\n", "foo ", "\x00\x00\x00\x00bar\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			content := []byte(tt.content)
+			got := Mask(content, []byte(tt.old))
+			if string(got) != tt.want {
+				t.Errorf("Mask = %q, want %q", got, tt.want)
+			}
+			if string(content) != tt.content {
+				t.Errorf("content changed to %q", content)
+			}
+			if bytes.Count(got, newline) != bytes.Count(content, newline) {
+				t.Errorf("line count changed: %q", got)
+			}
+		})
+	}
+}
+
+// A masked occurrence must not be what a hint settles for: the ladder starts
+// with the identity normalization, which would otherwise match the block
+// that is already there and report it as the near thing.
+func TestMask_hintLooksPastTheMaskedOccurrence(t *testing.T) {
+	content := []byte("a\n  b\na\n\tb\n")
+	old := []byte("a\n  b")
+	want := "file line 4 starts with 1 tab, old block line 2 with 2 spaces (near line 3)"
+	if got := Hint(Mask(content, old), old); got != want {
+		t.Errorf("Hint = %q, want %q", got, want)
+	}
+}
+
 func TestMismatch(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -86,7 +130,8 @@ func TestMismatch(t *testing.T) {
 		{"none with a hint to follow", nil, 1, true, "f.txt: old block found 0 times, expected 1"},
 		{"one but wanted more", []int{7}, 2, false, "f.txt: old block found once (line 7), expected 2; pass -n 1, or read the file again"},
 		{"many", []int{1, 3, 4}, 1, false, "f.txt: old block found 3 times (lines 1, 3, 4), expected 1; widen the old block, or pass -n 3"},
-		{"hinted only drops the tail when nothing was found", []int{1, 3}, 1, true, "f.txt: old block found 2 times (lines 1, 3), expected 1; widen the old block, or pass -n 2"},
+		{"one but wanted more, with a hint to follow", []int{7}, 2, true, "f.txt: old block found once (line 7), expected 2; pass -n 1"},
+		{"hinted keeps the whole tail when more were found than expected", []int{1, 3}, 1, true, "f.txt: old block found 2 times (lines 1, 3), expected 1; widen the old block, or pass -n 2"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

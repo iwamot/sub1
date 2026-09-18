@@ -305,6 +305,57 @@ func TestRun_absentBlockGetsHint(t *testing.T) {
 	}
 }
 
+// A count that fell short leaves something to look for, and the hint
+// describes it while the count line keeps -n and drops the suggestion to
+// read the file again.
+//
+// The occurrence that matched sits after the one that did not, so that a
+// mask taken in the wrong space would land on the wrong bytes: the offsets
+// are the file's own, and a CRLF file is folded only afterwards.
+func TestRun_fewerThanExpectedGetsHint(t *testing.T) {
+	tests := []struct {
+		name string
+		file string
+		want string
+	}{
+		{"LF", "a\n\tb\na\n  b\n", "file line 2 starts with 1 tab, old block line 2 with 2 spaces (near line 1)"},
+		{"CRLF throughout", "a\r\n\tb\r\na\r\n  b\r\n", "file line 2 starts with 1 tab, old block line 2 with 2 spaces (near line 1)"},
+		{"mixed line endings", "a\r\n\tb\r\na\n  b\n", "the file has mixed line endings; file line 2 starts with 1 tab, old block line 2 with 2 spaces (near line 1)"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeTemp(t, tt.file)
+			r := runWith([]string{path, "-n", "2"}, "a\n  b\n====\nc\n====\n")
+			if r.code != exitMismatch {
+				t.Fatalf("exit = %d, want 1 (stderr: %q)", r.code, r.stderr)
+			}
+			want := "sub1: " + path + ": old block found once (line 3), expected 2; pass -n 1\n" +
+				"  hint: " + tt.want + "\n"
+			if r.stderr != want {
+				t.Errorf("stderr = %q, want %q", r.stderr, want)
+			}
+			if got := readBack(t, path); got != tt.file {
+				t.Errorf("file changed to %q", got)
+			}
+		})
+	}
+}
+
+// More occurrences than expected leave nothing missing to look for, so the
+// count line reads as it did.
+func TestRun_moreThanExpectedGetsNoHint(t *testing.T) {
+	original := "a\n  b\na\n  b\n"
+	path := writeTemp(t, original)
+	r := runWith([]string{path}, "a\n  b\n====\nc\n====\n")
+	if r.code != exitMismatch {
+		t.Fatalf("exit = %d, want 1 (stderr: %q)", r.code, r.stderr)
+	}
+	want := "sub1: " + path + ": old block found 2 times (lines 1, 3), expected 1; widen the old block, or pass -n 2\n"
+	if r.stderr != want {
+		t.Errorf("stderr = %q, want %q", r.stderr, want)
+	}
+}
+
 func TestRun_crlfFileIsEditedAsCRLF(t *testing.T) {
 	tests := []struct {
 		name  string

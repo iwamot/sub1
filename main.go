@@ -309,14 +309,19 @@ func run(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 	lines := occur.Lines(content, old)
 	if len(lines) != a.expected {
-		// The hint is worked out first: when there is one, it takes the
-		// place of the general suggestion the count line would otherwise
-		// end with.
+		// The hint is worked out first: when there is one, it replaces the
+		// suggestion to read the file again that the count line would
+		// otherwise end with.
 		hint := ""
-		if len(lines) == 0 {
-			hintContent := content
+		if len(lines) < a.expected {
+			// A count that fell short leaves something to look for; more
+			// occurrences than expected leave nothing. Mask takes the
+			// ones that were found out of the way, before the fold, so that
+			// the hint describes what is missing rather than a match that
+			// is already there.
+			hintContent := occur.Mask(content, old)
 			if asCRLF {
-				hintContent = crlf.ToLF(content)
+				hintContent = crlf.ToLF(hintContent)
 			}
 			hint = occur.Hint(hintContent, blocks.Old)
 		}
