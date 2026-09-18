@@ -80,6 +80,30 @@ func offsets(content, old []byte) []int {
 	}
 }
 
+// Mask returns a copy of content with every occurrence of old blanked out,
+// so that a hint asked for afterwards looks for what is missing instead of
+// settling for an occurrence that is already there.
+//
+// The byte blanked in is NUL, which an old block written as text does not
+// carry and which the normalizations behind a hint cannot strip, since all
+// they take away is spaces and tabs. Line breaks inside an occurrence are
+// left alone, so the masked content has the same lines as the original and a
+// line number found in it is the line number in the file.
+//
+// The offsets are the ones in content as it was given, so a caller that
+// folds CRLF away before asking for a hint masks first and folds afterwards.
+func Mask(content, old []byte) []byte {
+	masked := bytes.Clone(content)
+	for _, pos := range offsets(content, old) {
+		for i := pos; i < pos+len(old); i++ {
+			if masked[i] != '\n' && masked[i] != '\r' {
+				masked[i] = 0
+			}
+		}
+	}
+	return masked
+}
+
 // Summary is the one-line report printed after a successful replacement.
 // The notes, if any, follow in parentheses.
 func Summary(path string, lines []int, notes []string) string {
@@ -164,9 +188,9 @@ func matches(n int, singular, plural string) string {
 // can decide which occurrences to widen the block around, or how many to
 // expect, without reading the file again.
 //
-// It ends with what to do next, unless a hint line follows: the hint says
-// more about a block that was not found at all than any general suggestion
-// could, so hinted drops the tail.
+// It ends with what to do next. Where a hint line follows, the hint says
+// more about what is missing than a suggestion to read the file could, so
+// that suggestion goes and the rest of the tail stays.
 func Mismatch(path string, lines []int, expected int, hinted bool) string {
 	where := ""
 	if len(lines) > 0 {
@@ -182,6 +206,12 @@ func Mismatch(path string, lines []int, expected int, hinted bool) string {
 // fewer are not, so there the count is the thing to accept or the block the
 // thing to fix. A block that was not found at all has nothing to widen, and
 // is either described by the hint that follows or read again from the file.
+//
+// A hint takes the place of reading the file again, which is the round trip
+// it exists to save. With nothing found, that was the whole tail and the
+// tail goes; with fewer found than expected, -n is a way out of its own and
+// stays. More than expected never asked for a read, and reads the same
+// either way.
 func remedy(found, expected int, hinted bool) string {
 	switch {
 	case found == 0 && hinted:
@@ -190,6 +220,8 @@ func remedy(found, expected int, hinted bool) string {
 		return "; no similar text found, read the file again"
 	case found > expected:
 		return fmt.Sprintf("; widen the old block, or pass -n %d", found)
+	case hinted:
+		return fmt.Sprintf("; pass -n %d", found)
 	default:
 		return fmt.Sprintf("; pass -n %d, or read the file again", found)
 	}

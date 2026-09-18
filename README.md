@@ -131,6 +131,21 @@ SUB1
 sub1: config.go: old block found 0 times, expected 1; no similar text found, read the file again
 ```
 
+A hint comes with a count that fell short as well. Two of the three blocks match and the third is indented with a tab, so the count line offers the count that was found and the hint describes the one that is missing:
+
+```
+$ sub1 -n 3 handlers.py <<'SUB1'
+    if chunk is None:
+        continue
+====
+    if chunk is None:
+        break
+====
+SUB1
+sub1: handlers.py: old block found 2 times (lines 27, 40), expected 3; pass -n 2
+  hint: file line 52 starts with 1 tab, old block line 1 with 4 spaces (near line 52)
+```
+
 Deleting a line. The new block is empty, so the two `====` lines follow each other:
 
 ```
@@ -221,7 +236,7 @@ The shapes below are stable. Later versions may add to them; they will not rewor
 |---|---|
 | stdout, replaced | `FILE: replaced at line N` or `FILE: replaced at lines N, M, ...` |
 | stderr, wrong count (exit 1) | `sub1: FILE: old block found once (line N), expected M` or `sub1: FILE: old block found N times (lines N, M, ...), expected M`, and `sub1: FILE: old block found 0 times, expected M` with no line list, there being no lines to name |
-| stderr, wrong count, second line | `  hint: <what differs> (near line N)`, when the old block was not found and something in the file comes close |
+| stderr, wrong count, second line | `  hint: <what differs> (near line N)`, when the old block was found fewer times than expected and something in the file comes close |
 | stderr, input error (exit 2) | `sub1: <what is wrong>`. No FILE: the command is what has to change, not the file |
 | stderr, file error (exit 3) | `sub1: FILE: <what is wrong>`, with `stdin` in the place of `FILE` when stdin is what could not be read |
 
