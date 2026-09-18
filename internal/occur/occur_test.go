@@ -143,6 +143,31 @@ func TestMismatch(t *testing.T) {
 	}
 }
 
+func TestSurroundings(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		old     string
+		want    string
+	}{
+		{"each place named by the line before it", "a\nfoo\nb\nfoo\n", "foo", `line 2 follows "a", line 4 follows "b" (near lines 2, 4)`},
+		{"a place at the start of the file has no line before it", "foo\nx\nfoo\n", "foo", `line 1 starts the file, line 3 follows "x" (near lines 1, 3)`},
+		{"places that read the same are named together", "a\nfoo\na\nfoo\n", "foo", `lines 2, 4 follow "a" (near lines 2, 4)`},
+		{"a block inside a line is named by the line it sits in", "x = f(1)\ny = f(2)\n", "f(", `line 1 sits in "x = f(1)", line 2 sits in "y = f(2)" (near lines 1, 2)`},
+		{"places inside lines that read the same are named together", "\tv = f(1)\n\tv = f(1)\n", "f(", `lines 1, 2 sit in "\tv = f(1)" (near lines 1, 2)`},
+		{"occurrences sharing a line are named once", "foo foo\nx\nfoo\n", "foo", `line 1 starts the file, line 3 follows "x" (near lines 1, 3)`},
+		{"one place is nothing to tell apart", "foo foo\n", "foo", ""},
+		{"a line ending is not part of the line it quotes", "a\r\nfoo\r\nb\r\nfoo\r\n", "foo", `line 2 follows "a", line 4 follows "b" (near lines 2, 4)`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := Surroundings([]byte(tt.content), []byte(tt.old)); got != tt.want {
+				t.Errorf("Surroundings = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestHint(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -202,6 +227,7 @@ func TestHint(t *testing.T) {
 		{"a line sharing less than half is not close", "\tprint(x)\n", "fmt.Sprintf(notes)", ""},
 		{"a short block is not scored at all", "y = 2;\n", "x = 1;", ""},
 		{"a multi-line block is left to the run step", "a\nqqqqqqqqqqqq\n", "aaaaaaaaaaaa\nbbbbbbbbbbbb", ""},
+		{"a carriage return the file really has is shown", "value := compute(alpha)\r", "value := compute(beta)", `the closest line is file line 1: "value := compute(alpha)\r" (near line 1)`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

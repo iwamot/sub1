@@ -264,7 +264,7 @@ func TestRun_countMismatchLeavesFileUntouched(t *testing.T) {
 		wantLine string
 	}{
 		{"absent", nil, "old block found 0 times, expected 1; no similar text found, read the file again\n"},
-		{"duplicate", nil, "old block found 2 times (lines 1, 2), expected 1; widen the old block, or pass -n 2\n"},
+		{"duplicate", nil, "old block found 2 times (lines 1, 2), expected 1; widen the old block, or pass -n 2\n  hint: line 1 starts the file, line 2 follows \"x\" (near lines 1, 2)\n"},
 		{"fewer than -n", []string{"-n", "3"}, "old block found 2 times (lines 1, 2), expected 3; pass -n 2, or read the file again\n"},
 	}
 	for _, tt := range tests {
@@ -358,18 +358,24 @@ func TestRun_fewerThanExpectedFindsTheMistypedLine(t *testing.T) {
 	}
 }
 
-// More occurrences than expected leave nothing missing to look for, so the
-// count line reads as it did.
-func TestRun_moreThanExpectedGetsNoHint(t *testing.T) {
-	original := "a\n  b\na\n  b\n"
+// More occurrences than expected leave nothing missing to look for, and what
+// is worth saying is what tells the places apart. Here the two places read
+// the same, which is what says that widening the block will not separate
+// them and -n is the way out.
+func TestRun_moreThanExpectedNamesThePlaces(t *testing.T) {
+	original := "def handle(x):\n    return _tool_chunks(x)\ndef retry(x):\n    return _tool_chunks(x)\n"
 	path := writeTemp(t, original)
-	r := runWith([]string{path}, "a\n  b\n====\nc\n====\n")
+	r := runWith([]string{path}, "_tool_chunks(\n====\ntool_chunks(\n====\n")
 	if r.code != exitMismatch {
 		t.Fatalf("exit = %d, want 1 (stderr: %q)", r.code, r.stderr)
 	}
-	want := "sub1: " + path + ": old block found 2 times (lines 1, 3), expected 1; widen the old block, or pass -n 2\n"
+	want := "sub1: " + path + ": old block found 2 times (lines 2, 4), expected 1; widen the old block, or pass -n 2\n" +
+		"  hint: lines 2, 4 sit in \"    return _tool_chunks(x)\" (near lines 2, 4)\n"
 	if r.stderr != want {
 		t.Errorf("stderr = %q, want %q", r.stderr, want)
+	}
+	if got := readBack(t, path); got != original {
+		t.Errorf("file changed to %q", got)
 	}
 }
 

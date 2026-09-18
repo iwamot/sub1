@@ -300,8 +300,9 @@ func run(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 	// The blocks come from a heredoc and end their lines with LF. A file
 	// that ends every line with CRLF is edited as CRLF: both blocks are
-	// converted before matching, and the hint, if one is needed, compares
-	// the LF forms so that line endings do not drown out the real difference.
+	// converted before matching, and the hint that has to compare them, the
+	// one for a count that fell short, is handed the LF forms instead so
+	// that line endings do not drown out the real difference.
 	old, new := blocks.Old, blocks.New
 	asCRLF := crlf.Uniform(content) && !bytes.ContainsRune(old, '\r') && !bytes.ContainsRune(new, '\r')
 	if asCRLF {
@@ -309,21 +310,23 @@ func run(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 	lines := occur.Lines(content, old)
 	if len(lines) != a.expected {
-		// The hint is worked out first: when there is one, it replaces the
-		// suggestion to read the file again that the count line would
-		// otherwise end with.
+		// The hint is worked out first: a count line that is followed by one
+		// leaves out the suggestion to read the file that it would otherwise
+		// end with.
 		hint := ""
 		if len(lines) < a.expected {
-			// A count that fell short leaves something to look for; more
-			// occurrences than expected leave nothing. Mask takes the
-			// ones that were found out of the way, before the fold, so that
-			// the hint describes what is missing rather than a match that
-			// is already there.
+			// Mask takes the occurrences that were found out of the way,
+			// before the fold, so that the hint describes what is missing
+			// rather than a match that is already there.
 			hintContent := occur.Mask(content, old)
 			if asCRLF {
 				hintContent = crlf.ToLF(hintContent)
 			}
 			hint = occur.Hint(hintContent, blocks.Old)
+		} else {
+			// Nothing is missing here. What helps instead is telling the
+			// places that were found apart, to widen the block around one.
+			hint = occur.Surroundings(content, old)
 		}
 		fmt.Fprintln(stderr, "sub1:", occur.Mismatch(a.path, lines, a.expected, hint != ""))
 		if hint != "" {
