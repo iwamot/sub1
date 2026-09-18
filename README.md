@@ -119,13 +119,26 @@ sub1: Makefile: old block found 0 times, expected 1
   hint: file line 4 starts with 1 tab, old block line 2 with 4 spaces (near line 3)
 ```
 
+Where the old block is one line and what it says is wrong rather than how it is spaced, the closest line in the file is quoted, so that a typo can be seen without opening the file. Quoted lines are escaped the way Go escapes a string, which is what makes the leading tab visible here, and a long line is cut with an ellipsis:
+
+```
+$ sub1 occur.go <<'SUB1'
+	return describeRun(notes)
+====
+	return describeRun(ws.trimmed())
+====
+SUB1
+sub1: occur.go: old block found 0 times, expected 1
+  hint: the closest line is file line 5: "\treturn describeRun(ws)" (near line 5)
+```
+
 The `hint:` line is a guess at what went wrong. The count on the first line is what decided that nothing was replaced. When nothing in the file comes close, there is no hint and the first line says so instead:
 
 ```
 $ sub1 config.go <<'SUB1'
-func handle(w http.ResponseWriter) {
+timeout = 30
 ====
-func handle(w http.ResponseWriter, r *http.Request) {
+timeout = 60
 ====
 SUB1
 sub1: config.go: old block found 0 times, expected 1; no similar text found, read the file again
