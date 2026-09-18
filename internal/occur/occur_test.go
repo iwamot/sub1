@@ -3,6 +3,7 @@ package occur
 import (
 	"bytes"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -174,24 +175,33 @@ func TestHint(t *testing.T) {
 		{"CRLF and tabs", "build:\r\n\tgo build\r\n", "build:\n    go build", "the file uses CRLF line endings; file line 2 starts with 1 tab, old block line 2 with 4 spaces (near line 1)"},
 		{"CRLF and trailing whitespace", "a \r\nb\r\n", "a\nb", "the file uses CRLF line endings; file line 1 ends with 1 space, old block line 1 with no trailing whitespace (near line 1)"},
 
-		{"run at the start of old", "x\na\nb\nc\nd\n", "a\nb\nC\nd", "lines 1-2 of the old block match file lines 2-3; line 3 differs (near line 2)"},
-		{"run keeps the longest", "a\nb\nX\n\na\nb\nc\nX\n", "a\nb\nc\nd", "lines 1-3 of the old block match file lines 5-7; line 4 differs (near line 5)"},
-		{"run keeps the earliest file place on a tie", "a\nb\nX\na\nb\nY\n", "a\nb\nc", "lines 1-2 of the old block match file lines 1-2; line 3 differs (near line 1)"},
-		{"run line must match whole", "a\nb\ncd\n", "a\nb\nc\ne", "lines 1-2 of the old block match file lines 1-2; line 3 differs (near line 1)"},
+		{"run at the start of old", "x\na\nb\nc\nd\n", "a\nb\nC\nd", "lines 1-2 of the old block match file lines 2-3; line 3 differs: file line 4 is \"c\" (near line 2)"},
+		{"run keeps the longest", "a\nb\nX\n\na\nb\nc\nX\n", "a\nb\nc\nd", "lines 1-3 of the old block match file lines 5-7; line 4 differs: file line 8 is \"X\" (near line 5)"},
+		{"run keeps the earliest file place on a tie", "a\nb\nX\na\nb\nY\n", "a\nb\nc", "lines 1-2 of the old block match file lines 1-2; line 3 differs: file line 3 is \"X\" (near line 1)"},
+		{"run line must match whole", "a\nb\ncd\n", "a\nb\nc\ne", "lines 1-2 of the old block match file lines 1-2; line 3 differs: file line 3 is \"cd\" (near line 1)"},
 		{"run first line must match whole too", "xfoo\nbar\nbaz\n", "foo\nbar\nqux", ""},
-		{"run skips a first line that only ends a file line", "xa\nb\nX\na\nb\nY\n", "a\nb\nc", "lines 1-2 of the old block match file lines 4-5; line 3 differs (near line 4)"},
+		{"run skips a first line that only ends a file line", "xa\nb\nX\na\nb\nY\n", "a\nb\nc", "lines 1-2 of the old block match file lines 4-5; line 3 differs: file line 6 is \"Y\" (near line 4)"},
 		{"run stops at end of file", "a\nb", "a\nb\nc", "lines 1-2 of the old block match file lines 1-2; line 3 differs (near line 1)"},
-		{"run in a CRLF file", "a\r\nb\r\nX\r\n", "a\nb\nc", "the file uses CRLF line endings; lines 1-2 of the old block match file lines 1-2; line 3 differs (near line 1)"},
+		{"run in a CRLF file", "a\r\nb\r\nX\r\n", "a\nb\nc", "the file uses CRLF line endings; lines 1-2 of the old block match file lines 1-2; line 3 differs: file line 3 is \"X\" (near line 1)"},
 		{"run of one line says nothing", "a\nx\n", "a\nb", ""},
 		{"run first line absent and nothing else in a row", "x\ny\n", "a\nb", ""},
 		{"single-line old has no run", "abc\n", "abd", ""},
-		{"run at the end of old: first line differs", "a\nb\nc\nd\n", "x\nb\nc\nd", "lines 2-4 of the old block match file lines 2-4; line 1 differs (near line 2)"},
+		{"run at the end of old: first line differs", "a\nb\nc\nd\n", "x\nb\nc\nd", "lines 2-4 of the old block match file lines 2-4; line 1 differs: file line 1 is \"a\" (near line 2)"},
 		{"run in the middle of old", "p\nb\nc\nq\n", "a\nb\nc\nd", "lines 2-3 of the old block match file lines 2-3; lines 1 and 4 differ (near line 2)"},
 		{"run in the middle of old with more lines after", "p\nb\nc\nq\nr\n", "a\nb\nc\nd\ne\nf", "lines 2-3 of the old block match file lines 2-3; lines 1 and 4 differ (near line 2)"},
 		{"longer run later in old beats a shorter one at its start", "a\nX\nb\nc\nd\n", "a\nb\nc\nd\ne", "lines 2-4 of the old block match file lines 3-5; lines 1 and 5 differ (near line 3)"},
 		{"earliest file place wins a tie even when later in old", "b\nc\nX\na\nb\nX\n", "a\nb\nc", "lines 2-3 of the old block match file lines 1-2; line 1 differs (near line 1)"},
-		{"same file place, earliest old place wins", "a\nb\nX\n", "a\nb\nY\na\nb", "lines 1-2 of the old block match file lines 1-2; line 3 differs (near line 1)"},
+		{"same file place, earliest old place wins", "a\nb\nX\n", "a\nb\nY\na\nb", "lines 1-2 of the old block match file lines 1-2; line 3 differs: file line 3 is \"X\" (near line 1)"},
 		{"run near the top of the file with old lines before it", "b\nc\nX\n", "a\nb\nc\nd", "lines 2-3 of the old block match file lines 1-2; lines 1 and 4 differ (near line 1)"},
+		{"run quotes the file line facing the one that differs", "x\n\tdef handle(self):\n    a\n    b\n", "def handle(self, req):\n    a\n    b", "lines 2-3 of the old block match file lines 3-4; line 1 differs: file line 2 is \"\\tdef handle(self):\" (near line 3)"},
+		{"run quotes nothing when the file has no line before it", "b\nc\n", "a\nb\nc", "lines 2-3 of the old block match file lines 1-2; line 1 differs (near line 1)"},
+		{"run quotes nothing when the file ends where old goes on", "a\nb\n", "a\nb\nc", "lines 1-2 of the old block match file lines 1-2; line 3 differs (near line 1)"},
+
+		{"closest line to a one-line block", "x\n\treturn fmt.Sprintf(lines)\n", "return fmt.Sprintf(notes)", "the closest line is file line 2: \"\\treturn fmt.Sprintf(lines)\" (near line 2)"},
+		{"closest line when the start was mistyped", "x\nvalue := compute(alpha)\n", "walue := compute(alpha)", "the closest line is file line 2: \"value := compute(alpha)\" (near line 2)"},
+		{"a line sharing less than half is not close", "\tprint(x)\n", "fmt.Sprintf(notes)", ""},
+		{"a short block is not scored at all", "y = 2;\n", "x = 1;", ""},
+		{"a multi-line block is left to the run step", "a\nqqqqqqqqqqqq\n", "aaaaaaaaaaaa\nbbbbbbbbbbbb", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -200,6 +210,45 @@ func TestHint(t *testing.T) {
 			}
 			if got := Hint([]byte(tt.content), []byte(tt.old)); got != tt.want {
 				t.Errorf("Hint = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// The head and the tail of a one-line old block have to sit about as far
+// apart in the line as they do in the block. Without that, a long line that
+// begins like the block and happens to end like it too would be named, and
+// the reader would learn nothing from looking at it.
+func TestHint_closestLineWantsTheEndsCloseTogether(t *testing.T) {
+	old := []byte("return fmt.Sprintf(notes)")
+	typo := []byte("x\n\treturn fmt.Sprintf(lines)\n")
+	apart := []byte("x\n\treturn x; " + strings.Repeat("z", 160) + "; y := f(notes)\n")
+	if got := Hint(typo, old); got == "" {
+		t.Error("Hint = \"\", want the line with the typo named")
+	}
+	if got := Hint(apart, old); got != "" {
+		t.Errorf("Hint = %q, want \"\"", got)
+	}
+}
+
+// The quoting is the same wherever a hint carries a line of the file, so it
+// is settled here rather than in each of the hints that use it.
+func TestQuoteLine(t *testing.T) {
+	tests := []struct {
+		name string
+		line string
+		want string
+	}{
+		{"plain", "value := 1", `"value := 1"`},
+		{"whitespace is visible", "\tvalue := 1 ", `"\tvalue := 1 "`},
+		{"empty", "", `""`},
+		{"at the limit", strings.Repeat("a", quoteMax), `"` + strings.Repeat("a", quoteMax) + `"`},
+		{"past the limit", strings.Repeat("a", quoteMax+1), `"` + strings.Repeat("a", quoteMax) + `"...`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := quoteLine([]byte(tt.line)); got != tt.want {
+				t.Errorf("quoteLine = %s, want %s", got, tt.want)
 			}
 		})
 	}

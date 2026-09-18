@@ -13,6 +13,27 @@ import (
 
 var newline = []byte("\n")
 
+const (
+	// quoteMax is where a quoted file line is cut. It is wide enough for an
+	// ordinary line of code and narrow enough that the hint stays one line
+	// on a terminal.
+	quoteMax = 120
+
+	// minOverlap is how much of a one-line old block a file line has to
+	// carry before it can be called the closest one. Half of the block is
+	// asked for as well, so this is the floor under that half: without it a
+	// short block — "}" or "return" — would name whichever line happens to
+	// share a couple of bytes with it.
+	minOverlap = 8
+
+	// gapSlack is how much longer what lies between the head and the tail
+	// of the old block may be in the file than in the block itself. A typo
+	// barely moves that distance, so allowing a little keeps the lines a
+	// typo produces while it rules out a long line that carries the head in
+	// one place and the tail somewhere else entirely.
+	gapSlack = 16
+)
+
 // Lines returns the 1-based line number at which each non-overlapping
 // occurrence of old starts, in order. The occurrences are the same ones
 // Replace rewrites, so len(Lines(...)) is the count that decides whether the
@@ -85,8 +106,9 @@ func offsets(content, old []byte) []int {
 // settling for an occurrence that is already there.
 //
 // The byte blanked in is NUL, which an old block written as text does not
-// carry and which the normalizations behind a hint cannot strip, since all
-// they take away is spaces and tabs. Line breaks inside an occurrence are
+// carry and which nothing a hint does can turn back into a match: the
+// normalizations only take spaces and tabs away, and the scoring that looks
+// for the closest line compares bytes. Line breaks inside an occurrence are
 // left alone, so the masked content has the same lines as the original and a
 // line number found in it is the line number in the file.
 //
@@ -230,13 +252,18 @@ func remedy(found, expected int, hinted bool) string {
 // Hint guesses why old, which does not occur in content, was expected to.
 // It reports the closest thing it can find, or "" when nothing comes close.
 //
-// The guess is made in two steps. First, content and old are compared with
-// one kind of whitespace difference ignored at a time, and the first kind
-// that makes them match is reported along with what the file actually has.
-// Second, for a multi-line block, the longest run of its lines that appears
-// in a row in the file is reported, along with the line next to that run
-// that must differ. The hint is only a lead: the count in the Mismatch line
-// is what decided that nothing was replaced.
+// The guess is made in three steps, and the first one that finds something
+// is the answer. First, content and old are compared with one kind of
+// whitespace difference ignored at a time, and the first kind that makes
+// them match is reported along with what the file actually has. Second, for
+// a multi-line block, the longest run of its lines that appears in a row in
+// the file is reported, along with the line next to that run that must
+// differ, quoted from the file where one line is all that differs. Third,
+// for a block of one line, the line that carries most of it is reported and
+// quoted. The steps divide the work by what went wrong: how the block is
+// spaced, then which of its several lines says something else, then what a
+// block of one line says. The hint is only a lead: the count in the
+// Mismatch line is what decided that nothing was replaced.
 //
 // The caller prints it under a "hint:" label. What to change comes first and
 // where it is goes in a trailing "(near ...)", because that is the order the
@@ -273,6 +300,9 @@ func Hint(content, old []byte) string {
 		return fmt.Sprintf("%s (near %s)", strings.Join(notes, "; "), lineList(lines))
 	}
 	line, note := runHint(content, old)
+	if line == 0 {
+		line, note = closestLine(content, old)
+	}
 	if line == 0 {
 		return ""
 	}
@@ -464,8 +494,9 @@ func mapLines(b []byte, f func([]byte) []byte) []byte {
 // runHint finds the longest run of consecutive lines of old that appears,
 // whole and in order, in content, at any offset into old. It returns the
 // 1-based file line where the run starts and a note naming the lines of old
-// it covers and the line next to it that must differ, or 0 when there is no
-// run to report. Lines are compared whole: a line of old ending a longer
+// it covers and the line next to it that must differ, quoted from the file
+// where there is one such line, or 0 when there is no run to report. Lines
+// are compared whole: a line of old ending a longer
 // file line is not a match. A single matching line says nothing, since a
 // brace or a blank line matches anywhere, so at least two lines must match.
 // The run never covers all of old: if it did, old as a whole would occur in
@@ -502,8 +533,132 @@ func runHint(content, old []byte) (int, string) {
 	if bestOld+best < len(oldLines) {
 		differs = append(differs, bestOld+best+1)
 	}
+	note := differLines(differs)
+	// Where one line of old is the only one known to differ, the file line
+	// facing it is the one to compare it against, and quoting it saves the
+	// reader the trip back to the file. Where two differ, one before the run
+	// and one after, neither is the line to fix and quoting one of them
+	// would point at the wrong end as often as the right one.
+	if len(differs) == 1 {
+		facing := bestFile - 1
+		if differs[0] > bestOld {
+			facing = bestFile + best
+		}
+		if text, ok := fileLine(fileLines, facing); ok {
+			note += fmt.Sprintf(": file line %d is %s", facing+1, quoteLine(text))
+		}
+	}
 	return bestFile + 1, fmt.Sprintf("lines %d-%d of the old block match file lines %d-%d; %s",
-		bestOld+1, bestOld+best, bestFile+1, bestFile+best, differLines(differs))
+		bestOld+1, bestOld+best, bestFile+1, bestFile+best, note)
+}
+
+// fileLine returns the line of the file at the 0-based index, and whether
+// there is one there. Splitting a file that ends with a line break leaves an
+// empty last element that is not a line of the file, and quoting it would
+// report an empty line where the file simply ends.
+func fileLine(lines [][]byte, i int) ([]byte, bool) {
+	if i < 0 || i >= len(lines) || (i == len(lines)-1 && len(lines[i]) == 0) {
+		return nil, false
+	}
+	return lines[i], true
+}
+
+// closestLine finds the file line that carries most of a one-line old block
+// and reports it with the line quoted, or 0 when no line carries enough of
+// it. It is the last thing a hint tries: the normalizations have found no
+// whitespace difference that explains the block, and runHint works on two
+// lines or more, so a block of one line that differs in what it says has
+// nothing to report without this.
+//
+// A line has to carry minOverlap bytes of the block, and half of it, before
+// it is named. What is being scored is a lead for a reader who will look at
+// the line, and a line that shares less than half of a block is one the
+// reader would not recognize. On a tie the earliest line in the file wins,
+// as it does in runHint.
+//
+// A block of several lines is left to runHint. Scoring one against a single
+// line of the file would be comparing things of different shapes, and the
+// line that came out of it would be named on the strength of whichever of
+// the block's lines it resembled.
+func closestLine(content, old []byte) (int, string) {
+	if bytes.Contains(old, newline) || len(old) < minOverlap {
+		return 0, ""
+	}
+	best, bestLine := 0, 0
+	var bestText []byte
+	for i, line := range bytes.Split(content, newline) {
+		if score := overlap(line, old); score > best {
+			best, bestLine, bestText = score, i+1, line
+		}
+	}
+	if best < max(minOverlap, len(old)/2) {
+		return 0, ""
+	}
+	return bestLine, fmt.Sprintf("the closest line is file line %d: %s", bestLine, quoteLine(bestText))
+}
+
+// overlap scores how much of old a line carries: the longest run of bytes
+// old begins with that appears somewhere in the line, plus the longest run
+// it ends with that appears after that run, the two chosen together.
+//
+// Choosing them together is what makes the score follow a typo. Taking the
+// longest head first and looking for a tail behind it spends the head on
+// whatever short run repeats earliest in the line, and the tail is then
+// hunted in what little is left; a block whose middle word was mistyped
+// scores near nothing that way, and near all of itself this way.
+//
+// The two runs must sit apart in the line by no more than gapSlack bytes
+// more than they do in old, which is what stops a long line from scoring by
+// carrying the head at one end and the tail at the other. A run of zero is
+// allowed on either side, and is what a block whose beginning or end was
+// mistyped falls back to; with one run there is no distance to check.
+func overlap(line, old []byte) int {
+	suffixes := make([]int, len(line)+1)
+	for k := range suffixes {
+		suffixes[k] = commonSuffix(old, line[:k])
+	}
+	best := 0
+	for _, s := range suffixes {
+		best = max(best, s)
+	}
+	for i := 0; i <= len(line); i++ {
+		p := commonPrefix(old, line[i:])
+		if p == 0 {
+			continue
+		}
+		best = max(best, p)
+		// The bound on k is the rule about the distance between the two
+		// runs. Asking that the line hold no more than gapSlack bytes more
+		// between them than old does is, once the runs themselves cancel
+		// from both sides, the same as asking that the tail end no further
+		// than the whole of old plus the slack past where the head began.
+		for k := i + p; k <= len(line) && k <= i+len(old)+gapSlack; k++ {
+			s := min(suffixes[k], len(old)-p)
+			if s == 0 || k-s < i+p {
+				continue
+			}
+			best = max(best, p+s)
+		}
+	}
+	return best
+}
+
+// commonPrefix returns the number of bytes a and b begin with in common.
+func commonPrefix(a, b []byte) int {
+	n := 0
+	for n < len(a) && n < len(b) && a[n] == b[n] {
+		n++
+	}
+	return n
+}
+
+// commonSuffix returns the number of bytes a and b end with in common.
+func commonSuffix(a, b []byte) int {
+	n := 0
+	for n < len(a) && n < len(b) && a[len(a)-1-n] == b[len(b)-1-n] {
+		n++
+	}
+	return n
 }
 
 // differLines words the lines of old, next to the matched run, that are
@@ -513,6 +668,24 @@ func differLines(lines []int) string {
 		return fmt.Sprintf("line %d differs", lines[0])
 	}
 	return fmt.Sprintf("lines %d and %d differ", lines[0], lines[1])
+}
+
+// quoteLine renders a line of the file so that a hint can carry what the
+// file actually says, not only where it is. It is quoted the way Go quotes a
+// string, which makes tabs and control characters visible: an old block that
+// was typed with the wrong whitespace differs in exactly those bytes, and a
+// bare copy of the line would hide the difference it was printed to show.
+//
+// Only one line is ever quoted, and a long one is cut to quoteMax bytes with
+// an ellipsis after the closing quote. The cut is by bytes, so it can fall
+// inside a multi-byte character; the quoting then shows that byte as an
+// escape, which is honest about what is there and is followed by the
+// ellipsis that says the line goes on.
+func quoteLine(line []byte) string {
+	if len(line) > quoteMax {
+		return strconv.Quote(string(line[:quoteMax])) + "..."
+	}
+	return strconv.Quote(string(line))
 }
 
 func lineList(lines []int) string {

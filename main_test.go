@@ -341,6 +341,23 @@ func TestRun_fewerThanExpectedGetsHint(t *testing.T) {
 	}
 }
 
+// The two halves of the hint work together: what was found is masked out,
+// and what is left to find is the line that carries most of the block. This
+// is the shape the failures take most often — a block of one line, mistyped.
+func TestRun_fewerThanExpectedFindsTheMistypedLine(t *testing.T) {
+	original := "value := compute(alpha)\nvalue := compute(alpah)\n"
+	path := writeTemp(t, original)
+	r := runWith([]string{path, "-n", "2"}, "value := compute(alpha)\n====\nvalue := compute(beta)\n====\n")
+	if r.code != exitMismatch {
+		t.Fatalf("exit = %d, want 1 (stderr: %q)", r.code, r.stderr)
+	}
+	want := "sub1: " + path + ": old block found once (line 1), expected 2; pass -n 1\n" +
+		"  hint: the closest line is file line 2: \"value := compute(alpah)\" (near line 2)\n"
+	if r.stderr != want {
+		t.Errorf("stderr = %q, want %q", r.stderr, want)
+	}
+}
+
 // More occurrences than expected leave nothing missing to look for, so the
 // count line reads as it did.
 func TestRun_moreThanExpectedGetsNoHint(t *testing.T) {
