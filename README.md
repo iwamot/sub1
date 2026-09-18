@@ -90,7 +90,10 @@ tool_chunks(
 ====
 SUB1
 sub1: handlers.py: old block found 3 times (lines 27, 40, 41), expected 1; widen the old block, or pass -n 3
+  hint: line 27 sits in "    chunks = _tool_chunks(raw)", lines 40, 41 sit in "    return _tool_chunks(c)" (near lines 27, 40, 41)
 ```
+
+The hint names each place by what a wider block would have to take in to reach it: the line it sits in, where the block begins inside a line, and the line before it, where the block begins a line. Places that read the same are named together, as lines 40 and 41 are here, which says that widening will not separate them.
 
 The agent then either widens the old block until it is unique, or says how many occurrences it expects. The count is still checked, so a stray extra match would still stop the edit:
 
@@ -249,7 +252,7 @@ The shapes below are stable. Later versions may add to them; they will not rewor
 |---|---|
 | stdout, replaced | `FILE: replaced at line N` or `FILE: replaced at lines N, M, ...` |
 | stderr, wrong count (exit 1) | `sub1: FILE: old block found once (line N), expected M` or `sub1: FILE: old block found N times (lines N, M, ...), expected M`, and `sub1: FILE: old block found 0 times, expected M` with no line list, there being no lines to name |
-| stderr, wrong count, second line | `  hint: <what differs> (near line N)`, when the old block was found fewer times than expected and something in the file comes close |
+| stderr, wrong count, second line | `  hint: <what the file has> (near line N)`, with `lines N, M, ...` in place of `line N` where more than one place is named. It follows a count that fell short when something in the file comes close, and a count that was too high when the places can be told apart |
 | stderr, input error (exit 2) | `sub1: <what is wrong>`. No FILE: the command is what has to change, not the file |
 | stderr, file error (exit 3) | `sub1: FILE: <what is wrong>`, with `stdin` in the place of `FILE` when stdin is what could not be read |
 

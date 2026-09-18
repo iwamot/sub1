@@ -210,9 +210,11 @@ func matches(n int, singular, plural string) string {
 // can decide which occurrences to widen the block around, or how many to
 // expect, without reading the file again.
 //
-// It ends with what to do next. Where a hint line follows, the hint says
-// more about what is missing than a suggestion to read the file could, so
-// that suggestion goes and the rest of the tail stays.
+// It ends with what to do next. A hint line may follow, and where one does
+// the tail gives up its suggestion to read the file, the hint saying more
+// about what is missing than the suggestion could. Nothing else in the tail
+// moves, so the way out of a count that is too high reads the same whether a
+// hint follows it or not.
 func Mismatch(path string, lines []int, expected int, hinted bool) string {
 	where := ""
 	if len(lines) > 0 {
@@ -247,6 +249,80 @@ func remedy(found, expected int, hinted bool) string {
 	default:
 		return fmt.Sprintf("; pass -n %d, or read the file again", found)
 	}
+}
+
+// Surroundings tells the places an old block was found apart from one
+// another, so that a block found more times than expected can be widened
+// until it is unique, or given up on in favour of -n, without the file being
+// read.
+//
+// What is named for each place is what a wider block would have to take in
+// to reach it: the line before it, where the block begins a line, and the
+// line it sits in, where the block begins inside one. Places whose line
+// reads the same are named together, which is how it shows that widening by
+// a line will not tell them apart.
+//
+// Occurrences that share a line are named once, and where that leaves a
+// single place there is nothing to tell apart and nothing is said. The
+// offsets are the ones in content as it was given, so the places are the
+// same ones the count reported.
+func Surroundings(content, old []byte) string {
+	fileLines := bytes.Split(content, newline)
+	type place struct {
+		one, many string
+		lines     []int
+	}
+	var places []place
+	where := map[string]int{}
+	seen := map[int]bool{}
+	var found []int
+	for _, pos := range offsets(content, old) {
+		line := bytes.Count(content[:pos], newline) + 1
+		if seen[line] {
+			continue
+		}
+		seen[line] = true
+		found = append(found, line)
+		var one, many string
+		switch {
+		case pos > 0 && content[pos-1] != '\n':
+			q := quoteLine(withoutLineEnding(fileLines[line-1]))
+			one, many = "sits in "+q, "sit in "+q
+		case line == 1:
+			// Only one place can start the file, so this one has no plural.
+			one, many = "starts the file", "starts the file"
+		default:
+			q := quoteLine(withoutLineEnding(fileLines[line-2]))
+			one, many = "follows "+q, "follow "+q
+		}
+		i, ok := where[one]
+		if !ok {
+			i = len(places)
+			where[one] = i
+			places = append(places, place{one: one, many: many})
+		}
+		places[i].lines = append(places[i].lines, line)
+	}
+	if len(found) < 2 {
+		return ""
+	}
+	parts := make([]string, len(places))
+	for i, p := range places {
+		phrase := p.one
+		if len(p.lines) > 1 {
+			phrase = p.many
+		}
+		parts[i] = lineList(p.lines) + " " + phrase
+	}
+	return fmt.Sprintf("%s (near %s)", strings.Join(parts, ", "), lineList(found))
+}
+
+// withoutLineEnding drops the "\r" that a CRLF file leaves at the end of a
+// line. Surroundings quotes from the file as it was read, so that this byte
+// is still there, and it is the line ending rather than anything a block
+// would be written to match.
+func withoutLineEnding(line []byte) []byte {
+	return bytes.TrimSuffix(line, []byte("\r"))
 }
 
 // Hint guesses why old, which does not occur in content, was expected to.
@@ -681,6 +757,11 @@ func differLines(lines []int) string {
 // inside a multi-byte character; the quoting then shows that byte as an
 // escape, which is honest about what is there and is followed by the
 // ellipsis that says the line goes on.
+//
+// Whatever the line holds is shown, a "\r" at its end included: a hint that
+// quotes from content whose line endings were folded away is quoting one the
+// file really has there. Surroundings, which works on the file as it was
+// read, takes the line ending off itself.
 func quoteLine(line []byte) string {
 	if len(line) > quoteMax {
 		return strconv.Quote(string(line[:quoteMax])) + "..."
