@@ -73,7 +73,8 @@ func TestResolveVersion(t *testing.T) {
 	}{
 		{"injected non-dev wins over build info", "1.2.3", &debug.BuildInfo{Main: debug.Module{Version: "9.9.9"}}, "1.2.3"},
 		{"injected non-dev wins with no build info", "1.2.3", nil, "1.2.3"},
-		{"dev falls back to build info Main.Version", devVersion, &debug.BuildInfo{Main: debug.Module{Version: "v0.0.3"}}, "v0.0.3"},
+		{"dev falls back to build info Main.Version, without the v", devVersion, &debug.BuildInfo{Main: debug.Module{Version: "v0.0.3"}}, "0.0.3"},
+		{"only the leading v is dropped", devVersion, &debug.BuildInfo{Main: debug.Module{Version: "v1.0.0-dev"}}, "1.0.0-dev"},
 		{"dev with (devel) build info falls through to dev", devVersion, &debug.BuildInfo{Main: debug.Module{Version: "(devel)"}}, devVersion},
 		{"dev with empty build info version falls through to dev", devVersion, &debug.BuildInfo{}, devVersion},
 		{"dev with nil build info falls through to dev", devVersion, nil, devVersion},
