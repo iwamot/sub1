@@ -265,7 +265,7 @@ func TestRun_countMismatchLeavesFileUntouched(t *testing.T) {
 		wantLine string
 	}{
 		{"absent", nil, "old block found 0 times, expected 1; no similar text found, read the file again\n"},
-		{"duplicate", nil, "old block found 2 times (lines 1, 2), expected 1; widen the old block, or pass -n 2\n  hint: line 1 starts the file, line 2 follows \"x\" (near lines 1, 2)\n"},
+		{"duplicate", nil, "old block found 2 times (lines 1, 2), expected 1; widen the old block to match only 1, or pass -n 2 to replace all 2\n  hint: line 1 starts the file, line 2 follows \"x\" (near lines 1, 2)\n"},
 		{"fewer than -n", []string{"-n", "3"}, "old block found 2 times (lines 1, 2), expected 3; pass -n 2, or read the file again\n"},
 	}
 	for _, tt := range tests {
@@ -370,7 +370,7 @@ func TestRun_moreThanExpectedNamesThePlaces(t *testing.T) {
 	if r.code != exitMismatch {
 		t.Fatalf("exit = %d, want 1 (stderr: %q)", r.code, r.stderr)
 	}
-	want := "sub1: " + path + ": old block found 2 times (lines 2, 4), expected 1; widen the old block, or pass -n 2\n" +
+	want := "sub1: " + path + ": old block found 2 times (lines 2, 4), expected 1; widen the old block to match only 1, or pass -n 2 to replace all 2\n" +
 		"  hint: lines 2, 4 sit in \"    return _tool_chunks(x)\" (near lines 2, 4)\n"
 	if r.stderr != want {
 		t.Errorf("stderr = %q, want %q", r.stderr, want)
