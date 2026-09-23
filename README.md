@@ -228,6 +228,10 @@ Options:
   -v, --version   show the version
   --instructions  print the paragraph for the agent's instruction file
 
+Notes:
+  "(...)" after "replaced at line N" is a note, not an error: a fact about
+  where a match sits, or "(CRLF)". Check the edit if a note was unexpected.
+
 Exit codes:
   0  replaced
   1  OLD found a different number of times than expected
