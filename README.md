@@ -264,6 +264,8 @@ The shapes below are stable. Later versions may add to them; they will not rewor
 
 Two things ride on top of those shapes and are not part of them. A line that ends with `; ` and a sentence carries what to do next; that is added where there is something to say, so do not depend on its presence or on its wording. A successful line can end with notes in parentheses, described above; the notes are free-form and change as sub1 learns which matches are worth pointing at, so read the part before the `(` and treat the rest as prose.
 
+The input is stable as well: the old and new blocks each closed by a separator line, `-n` and `-d` as described above, and an empty new block deleting the old one. Later versions may add options, and an option may bring output lines and exit codes of its own. A call that uses none of them keeps the shapes above and its exit code, and a new way of reading the input comes with an option of its own rather than changing how input without one is read.
+
 ## Out of scope
 
 - Regular expressions. The blocks are literal bytes.
