@@ -55,6 +55,8 @@ func TestReplace(t *testing.T) {
 		{"empty new deletes the line break the file has, the other way", "a\nb\r\nc\n", "b", "", "a\nc\n"},
 		{"empty new deletes a line that starts with a blank line", "a\n\nb\nc\n", "\nb", "", "a\nc\n"},
 		{"empty new deletes each occurrence on its own", "b\nab\nb\n", "b", "", "a\n"},
+		{"empty new leaves the line break the next occurrence starts with to it", "\nb\nb\n", "\nb", "", "\n"},
+		{"empty new leaves the CRLF the next occurrence starts with to it", "\r\nb\r\nb\r\n", "\r\nb", "", "\r\n"},
 		{"empty new deletes the whole file", "b\n", "b", "", ""},
 		{"empty new deletes a last line without a line break", "a\nb", "b", "", "a\n"},
 
@@ -196,6 +198,9 @@ func TestHint(t *testing.T) {
 		{"inner difference after an equal run", "a b  c\n", "a b c", "file line 1 has 2 spaces where the old block has 1 space (near line 1)"},
 		{"inner mixed run", "a \t b\n", "a b", "file line 1 has mixed tabs and spaces where the old block has 1 space (near line 1)"},
 		{"leading and inner together", "\ta  b\n", "  a b", "file line 1 has 1 tab where the old block has 2 spaces (near line 1)"},
+		{"a whitespace match mid-line is quoted, not described", "  return  1\n", "return 1", "the closest line is file line 1: \"  return  1\" (near line 1)"},
+		{"an old block of whitespace alone gets no hint", "]a]b\n", " ", ""},
+		{"an old block of whitespace alone against a tab mid-line gets no hint", "00\t\n", " ", ""},
 		{"inner whitespace cannot be absent on one side", "a b\n", "ab", ""},
 		{"CRLF and tabs", "build:\r\n\tgo build\r\n", "build:\n    go build", "the file uses CRLF line endings; file line 2 starts with 1 tab, old block line 2 with 4 spaces (near line 1)"},
 		{"CRLF and trailing whitespace", "a \r\nb\r\n", "a\nb", "the file uses CRLF line endings; file line 1 ends with 1 space, old block line 1 with no trailing whitespace (near line 1)"},

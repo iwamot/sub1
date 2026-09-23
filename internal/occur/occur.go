@@ -59,16 +59,22 @@ func Lines(content, old []byte) []int {
 // blank line already carries its own line break and takes nothing more. The
 // line break is deleted as it is in the file, CRLF or LF, so the rule needs
 // no knowledge of the file's line endings. Each occurrence is judged on its
-// own, against the original content.
+// own, against the original content. A line break that the next occurrence
+// starts with belongs to that occurrence and is deleted with it, so every
+// occurrence that was counted is deleted whole.
 func Replace(content, old, new []byte) []byte {
 	var out []byte
 	pos := 0
-	for _, i := range offsets(content, old) {
+	found := offsets(content, old)
+	for k, i := range found {
 		out = append(out, content[pos:i]...)
 		out = append(out, new...)
 		pos = i + len(old)
 		if len(new) == 0 && (i == 0 || content[i-1] == '\n') && !bytes.HasSuffix(old, newline) {
-			pos += lineBreakLen(content[pos:])
+			brk := lineBreakLen(content[pos:])
+			if k+1 == len(found) || found[k+1] >= pos+brk {
+				pos += brk
+			}
 		}
 	}
 	return append(out, content[pos:]...)
@@ -363,7 +369,24 @@ func Hint(content, old []byte) string {
 		notes = append(notes, note)
 	}
 	for _, n := range normalizations {
-		lines := Lines(n.apply(content), n.apply(old))
+		// An old block of spaces and tabs alone normalizes to nothing,
+		// which occurs everywhere and says nothing about what differs.
+		normOld := n.apply(old)
+		if len(normOld) == 0 {
+			continue
+		}
+		// A description compares old with the file line by line from the
+		// start of each line, so it only holds for a match that starts a
+		// line. One that starts mid-line is left to the hints below, which
+		// quote the line instead of describing it.
+		normContent := n.apply(content)
+		var lines []int
+		for _, pos := range offsets(normContent, normOld) {
+			if n.describe != nil && pos > 0 && normContent[pos-1] != '\n' {
+				continue
+			}
+			lines = append(lines, bytes.Count(normContent[:pos], newline)+1)
+		}
 		if len(lines) == 0 {
 			continue
 		}
