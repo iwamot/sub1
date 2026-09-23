@@ -362,3 +362,49 @@ func TestNotes(t *testing.T) {
 		})
 	}
 }
+
+// FuzzReplace checks that every occurrence Lines counts is replaced, and
+// that a deletion takes at most one line break beyond each occurrence. Run
+// it with -fuzz to search beyond the seeds.
+func FuzzReplace(f *testing.F) {
+	f.Add([]byte("a\nb\nc\n"), []byte("b"), []byte(""))
+	f.Add([]byte("\nb\nb\n"), []byte("\nb"), []byte(""))
+	f.Add([]byte("\r\nb\r\nb\r\n"), []byte("\r\nb"), []byte(""))
+	f.Add([]byte("x(1)\ny\nx(2)\n"), []byte("x("), []byte("z("))
+	f.Fuzz(func(t *testing.T, content, old, new []byte) {
+		if len(old) == 0 {
+			return // the block parser rejects an empty old block
+		}
+		n := len(Lines(content, old))
+		out := Replace(content, old, new)
+		if len(new) > 0 {
+			if want := len(content) + n*(len(new)-len(old)); len(out) != want {
+				t.Fatalf("len(Replace) = %d, want %d", len(out), want)
+			}
+			return
+		}
+		removed := len(content) - len(out)
+		if removed < n*len(old) || removed > n*(len(old)+2) {
+			t.Fatalf("deleting %d occurrences of %d bytes removed %d bytes", n, len(old), removed)
+		}
+	})
+}
+
+// FuzzHint checks that the hints and notes return for any file and old
+// block, instead of panicking or looping. Run it with -fuzz to search
+// beyond the seeds.
+func FuzzHint(f *testing.F) {
+	f.Add([]byte("  return  1\n"), []byte("return 1"), []byte("return 2"))
+	f.Add([]byte("]a]b\n"), []byte(" "), []byte("x"))
+	f.Add([]byte("00\t\n"), []byte(" "), []byte("0"))
+	f.Add([]byte("x\r\n\tfoo\r\n"), []byte("  foo"), []byte("  bar"))
+	f.Fuzz(func(t *testing.T, content, old, new []byte) {
+		if len(old) == 0 {
+			return // the block parser rejects an empty old block
+		}
+		Hint(content, old)
+		Hint(Mask(content, old), old)
+		Surroundings(content, old)
+		Notes(content, old, new)
+	})
+}

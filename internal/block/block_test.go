@@ -206,3 +206,18 @@ func TestSplit(t *testing.T) {
 		})
 	}
 }
+
+// FuzzSplit checks that any input is either split into a non-empty old
+// block or rejected, without panicking. Run it with -fuzz to search beyond
+// the seeds.
+func FuzzSplit(f *testing.F) {
+	f.Add([]byte("a\n====\nb\n====\n"), []byte("===="))
+	f.Add([]byte("a\n====\nb\n====\nc\n====\nd\n====\n"), []byte("===="))
+	f.Add([]byte("a\n====\n====\n"), []byte("%%%%"))
+	f.Fuzz(func(t *testing.T, input, sep []byte) {
+		blocks, err := Split(input, sep)
+		if err == nil && len(blocks.Old) == 0 {
+			t.Fatalf("Split(%q, %q) returned an empty old block", input, sep)
+		}
+	})
+}
