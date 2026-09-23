@@ -80,7 +80,7 @@ Examples:
   SUB1
 
 Options:
-  -n N            expect OLD N times (default 1)
+  -n N            expect OLD N times and replace all N (default 1)
   -d SEP          line that ends OLD and ends NEW (default "====")
   -h, --help      show this help
   -v, --version   show the version

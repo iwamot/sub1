@@ -89,7 +89,7 @@ _tool_chunks(
 tool_chunks(
 ====
 SUB1
-sub1: handlers.py: old block found 3 times (lines 27, 40, 41), expected 1; widen the old block, or pass -n 3
+sub1: handlers.py: old block found 3 times (lines 27, 40, 41), expected 1; widen the old block to match only 1, or pass -n 3 to replace all 3
   hint: line 27 sits in "    chunks = _tool_chunks(raw)", lines 40, 41 sit in "    return _tool_chunks(c)" (near lines 27, 40, 41)
 ```
 
@@ -222,7 +222,7 @@ Examples:
   SUB1
 
 Options:
-  -n N            expect OLD N times (default 1)
+  -n N            expect OLD N times and replace all N (default 1)
   -d SEP          line that ends OLD and ends NEW (default "====")
   -h, --help      show this help
   -v, --version   show the version

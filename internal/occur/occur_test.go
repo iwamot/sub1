@@ -132,9 +132,10 @@ func TestMismatch(t *testing.T) {
 		{"none", nil, 1, false, "f.txt: old block found 0 times, expected 1; no similar text found, read the file again"},
 		{"none with a hint to follow", nil, 1, true, "f.txt: old block found 0 times, expected 1"},
 		{"one but wanted more", []int{7}, 2, false, "f.txt: old block found once (line 7), expected 2; pass -n 1, or read the file again"},
-		{"many", []int{1, 3, 4}, 1, false, "f.txt: old block found 3 times (lines 1, 3, 4), expected 1; widen the old block, or pass -n 3"},
+		{"many", []int{1, 3, 4}, 1, false, "f.txt: old block found 3 times (lines 1, 3, 4), expected 1; widen the old block to match only 1, or pass -n 3 to replace all 3"},
+		{"more than a count above one", []int{1, 3, 4}, 2, false, "f.txt: old block found 3 times (lines 1, 3, 4), expected 2; widen the old block to match only 2, or pass -n 3 to replace all 3"},
 		{"one but wanted more, with a hint to follow", []int{7}, 2, true, "f.txt: old block found once (line 7), expected 2; pass -n 1"},
-		{"hinted keeps the whole tail when more were found than expected", []int{1, 3}, 1, true, "f.txt: old block found 2 times (lines 1, 3), expected 1; widen the old block, or pass -n 2"},
+		{"hinted keeps the whole tail when more were found than expected", []int{1, 3}, 1, true, "f.txt: old block found 2 times (lines 1, 3), expected 1; widen the old block to match only 1, or pass -n 2 to replace all 2"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

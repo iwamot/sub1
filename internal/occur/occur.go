@@ -230,12 +230,17 @@ func Mismatch(path string, lines []int, expected int, hinted bool) string {
 		path, times(len(lines)), where, expected, remedy(len(lines), expected, hinted))
 }
 
-// remedy names the way out of a count mismatch, with the count that was
-// found filled in so that the caller can use it as it stands. More
-// occurrences than expected are cut down by adding context to the old block;
-// fewer are not, so there the count is the thing to accept or the block the
-// thing to fix. A block that was not found at all has nothing to widen, and
-// is either described by the hint that follows or read again from the file.
+// remedy names the way out of a count mismatch, with the counts filled in so
+// that the caller can use them as they stand. More occurrences than expected
+// are cut down by adding context to the old block until it matches the
+// expected count; fewer are not, so there the count is the thing to accept or
+// the block the thing to fix. A block that was not found at all has nothing
+// to widen, and is either described by the hint that follows or read again
+// from the file.
+//
+// Where -n is offered against a count that is too high, the tail says that
+// it replaces every occurrence. "-n 2" on its own reads as picking the second
+// one, and a caller that wanted one of them would then rewrite both.
 //
 // A hint takes the place of reading the file again, which is the round trip
 // it exists to save. With nothing found, that was the whole tail and the
@@ -249,7 +254,7 @@ func remedy(found, expected int, hinted bool) string {
 	case found == 0:
 		return "; no similar text found, read the file again"
 	case found > expected:
-		return fmt.Sprintf("; widen the old block, or pass -n %d", found)
+		return fmt.Sprintf("; widen the old block to match only %d, or pass -n %d to replace all %d", expected, found, found)
 	case hinted:
 		return fmt.Sprintf("; pass -n %d", found)
 	default:
