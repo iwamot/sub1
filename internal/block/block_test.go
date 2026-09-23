@@ -106,6 +106,15 @@ func TestSplit(t *testing.T) {
 			wantErr: "found 3 \"====\" lines, expected 2; a content line equals \"====\", so pass -d '%%%%' and write %%%% on both separator lines",
 		},
 		{
+			// Two closed old/new pairs in a row, or one pair whose blocks
+			// each hold a Markdown setext underline. Either way it is
+			// rejected, not read as two pairs.
+			name:    "four separators are not read as two pairs",
+			input:   "a\n====\nb\n====\nc\n====\nd\n====\n",
+			sep:     sep,
+			wantErr: "found 4 \"====\" lines, expected 2; a content line equals \"====\", so pass -d '%%%%' and write %%%% on both separator lines",
+		},
+		{
 			name:    "the named separator skips the ones the input already holds",
 			input:   "a\n====\n%%%%\n@@@@\n####\nb\n====\nc\n====\n",
 			sep:     sep,
