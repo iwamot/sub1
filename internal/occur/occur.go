@@ -363,15 +363,20 @@ func Hint(content, old []byte) string {
 	// as well, and the "\r" would otherwise hide a trailing-whitespace
 	// difference. The old block comes from a heredoc and has no "\r" to fold.
 	// The caller folds a file that is CRLF throughout before asking for a
-	// hint, so CRLF seen here normally means the file mixes line endings.
+	// hint, so CRLF seen here normally means the file mixes line endings,
+	// which the caller matches as is. Where a match below fixes the lines the
+	// old block covers, the note names the ones that end with CRLF, since
+	// those are the lines the old block has to end with "\r" as well.
 	var notes []string
+	raw := content
+	mixed := false
 	if bytes.Contains(content, []byte("\r\n")) {
-		note := "the file has mixed line endings"
 		if crlf.Uniform(content) {
-			note = "the file uses CRLF line endings"
+			notes = append(notes, "the file uses CRLF line endings")
+		} else {
+			mixed = true
 		}
 		content = crlf.ToLF(content)
-		notes = append(notes, note)
 	}
 	for _, n := range normalizations {
 		// An old block of spaces and tabs alone normalizes to nothing,
@@ -395,6 +400,11 @@ func Hint(content, old []byte) string {
 		if len(lines) == 0 {
 			continue
 		}
+		if mixed {
+			if note := describeCRLF(raw, old, lines[0]); note != "" {
+				notes = append(notes, note)
+			}
+		}
 		if n.describe != nil {
 			notes = append(notes, n.describe(content, old, lines[0]))
 		}
@@ -409,6 +419,9 @@ func Hint(content, old []byte) string {
 	}
 	if line == 0 {
 		return ""
+	}
+	if mixed {
+		notes = append(notes, "the file has mixed line endings")
 	}
 	return fmt.Sprintf("%s (near line %d)", strings.Join(append(notes, note), "; "), line)
 }
@@ -584,6 +597,56 @@ func region(content, old []byte, line int) (oldLines, fileLines [][]byte) {
 	oldLines = bytes.Split(old, newline)
 	fileLines = bytes.Split(content, newline)[line-1:]
 	return oldLines, fileLines[:len(oldLines)]
+}
+
+// describeCRLF names the lines of raw, among those the old block covers when
+// its match starts at the given 1-based line, that end with CRLF where the
+// old block has LF, or returns "" when there are none. The last line the old
+// block covers is left out: the old block ends before that line's break, so
+// the break is not part of what has to match.
+func describeCRLF(raw, old []byte, line int) string {
+	fileLines := bytes.SplitAfter(raw, newline)[line-1:]
+	var lines []int
+	for i := range bytes.Count(old, newline) {
+		if bytes.HasSuffix(fileLines[i], []byte("\r\n")) {
+			lines = append(lines, i+1)
+		}
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	fileNums := make([]int, len(lines))
+	for i, n := range lines {
+		fileNums[i] = n + line - 1
+	}
+	verb := "ends"
+	if len(lines) > 1 {
+		verb = "end"
+	}
+	return fmt.Sprintf("file %s %s with CRLF, old block %s with LF", lineRuns(fileNums), verb, lineRuns(lines))
+}
+
+// lineRuns renders ascending line numbers the way lineList does, with each
+// run of consecutive numbers written as its first and last: "lines 2-4, 7".
+func lineRuns(lines []int) string {
+	var parts []string
+	for i := 0; i < len(lines); {
+		j := i
+		for j+1 < len(lines) && lines[j+1] == lines[j]+1 {
+			j++
+		}
+		part := strconv.Itoa(lines[i])
+		if j > i {
+			part += "-" + strconv.Itoa(lines[j])
+		}
+		parts = append(parts, part)
+		i = j + 1
+	}
+	noun := "line"
+	if len(lines) != 1 {
+		noun = "lines"
+	}
+	return noun + " " + strings.Join(parts, ", ")
 }
 
 // mapLines applies f to each line of b, leaving the line breaks as they are.
