@@ -321,7 +321,7 @@ func TestRun_fewerThanExpectedGetsHint(t *testing.T) {
 	}{
 		{"LF", "a\n\tb\na\n  b\n", "file line 2 starts with 1 tab, old block line 2 with 2 spaces (near line 1)"},
 		{"CRLF throughout", "a\r\n\tb\r\na\r\n  b\r\n", "file line 2 starts with 1 tab, old block line 2 with 2 spaces (near line 1)"},
-		{"mixed line endings", "a\r\n\tb\r\na\n  b\n", "the file has mixed line endings; file line 2 starts with 1 tab, old block line 2 with 2 spaces (near line 1)"},
+		{"mixed line endings", "a\r\n\tb\r\na\n  b\n", "file line 1 ends with CRLF, old block line 1 with LF; file line 2 starts with 1 tab, old block line 2 with 2 spaces (near line 1)"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -430,7 +430,7 @@ func TestRun_mixedLineEndingsAreMatchedAsIs(t *testing.T) {
 		t.Fatalf("exit = %d, want 1 (stderr: %q)", r.code, r.stderr)
 	}
 	want := "sub1: " + path + ": old block found 0 times, expected 1\n" +
-		"  hint: the file has mixed line endings (near line 1)\n"
+		"  hint: file line 1 ends with CRLF, old block line 1 with LF (near line 1)\n"
 	if r.stderr != want {
 		t.Errorf("stderr = %q, want %q", r.stderr, want)
 	}

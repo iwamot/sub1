@@ -215,7 +215,7 @@ Examples:
   @@
   SUB1
 
-  sub1 handlers.py <<'SUB1'         # an empty new block deletes the old one
+  sub1 handlers.py <<'SUB1'         # an empty new block deletes the whole line
   import os
   ====
   ====
