@@ -1,0 +1,5 @@
+# Build and coverage output
+/dist/
+/coverage.out
+/sub1
+/sub1.exe
