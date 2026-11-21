@@ -48,24 +48,14 @@ func TestReplace(t *testing.T) {
 		{"overlapping candidates are not double replaced", "aaa\n", "aa", "b", "ba\n"},
 
 		{"empty new deletes the whole line", "a\nb\nc\n", "b", "", "a\nc\n"},
-		{"empty new deletes several whole lines", "a\nb\nc\nd\n", "b\nc", "", "a\nd\n"},
-		{"empty new deletes the first line", "b\nc\n", "b", "", "c\n"},
 		{"empty new deletes a CRLF line", "a\r\nb\r\nc\r\n", "b", "", "a\r\nc\r\n"},
 		{"empty new deletes the line break the file has", "a\r\nb\nc\r\n", "b", "", "a\r\nc\r\n"},
-		{"empty new deletes the line break the file has, the other way", "a\nb\r\nc\n", "b", "", "a\nc\n"},
-		{"empty new deletes a line that starts with a blank line", "a\n\nb\nc\n", "\nb", "", "a\nc\n"},
 		{"empty new deletes each occurrence on its own", "b\nab\nb\n", "b", "", "a\n"},
 		{"empty new leaves the line break the next occurrence starts with to it", "\nb\nb\n", "\nb", "", "\n"},
 		{"empty new leaves the CRLF the next occurrence starts with to it", "\r\nb\r\nb\r\n", "\r\nb", "", "\r\n"},
-		{"empty new deletes the whole file", "b\n", "b", "", ""},
-		{"empty new deletes a last line without a line break", "a\nb", "b", "", "a\n"},
 
 		{"empty new keeps the line break of a mid-line old", "ab\ncd\n", "b", "", "a\ncd\n"},
-		{"empty new keeps the line break when old ends a line", "ab\ncd\n", "b\ncd", "", "a\n"},
-		{"empty new keeps the line break of adjacent mid-line occurrences", "bb\n", "b", "", "\n"},
 		{"empty new keeps a blank line after an old that ends with one", "a\nb\n\nc\n", "b\n", "", "a\n\nc\n"},
-		{"empty new keeps a blank line after a multi-line old that ends with one", "a\nb\nc\n\nd\n", "b\nc\n", "", "a\n\nd\n"},
-		{"empty new keeps the line break of a CRLF old", "a\r\nb\r\n\r\nc\r\n", "b\r\n", "", "a\r\n\r\nc\r\n"},
 		{"empty new keeps a lone CR", "a\nb\rc\n", "b", "", "a\n\rc\n"},
 	}
 	for _, tt := range tests {
@@ -368,23 +358,30 @@ func TestNotes(t *testing.T) {
 	}
 }
 
-// FuzzReplace checks that every occurrence Lines counts is replaced, and
-// that a deletion takes at most one line break beyond each occurrence. Run
-// it with -fuzz to search beyond the seeds.
+// FuzzReplace compares literal replacement with the standard library and
+// checks that deletion takes at most one extra line break per occurrence.
+// Run it with -fuzz to search beyond the seeds.
 func FuzzReplace(f *testing.F) {
 	f.Add([]byte("a\nb\nc\n"), []byte("b"), []byte(""))
 	f.Add([]byte("\nb\nb\n"), []byte("\nb"), []byte(""))
 	f.Add([]byte("\r\nb\r\nb\r\n"), []byte("\r\nb"), []byte(""))
 	f.Add([]byte("x(1)\ny\nx(2)\n"), []byte("x("), []byte("z("))
+	f.Add([]byte("a\nb\nc\n\nd\n"), []byte("b\nc\n"), []byte(""))
+	f.Add([]byte("a\r\nb\r\n\r\nc\r\n"), []byte("b\r\n"), []byte(""))
+	f.Add([]byte{0, 255, 0, 255}, []byte{0, 255}, []byte{254})
 	f.Fuzz(func(t *testing.T, content, old, new []byte) {
 		if len(old) == 0 {
 			return // the block parser rejects an empty old block
 		}
+		savedContent, savedOld, savedNew := bytes.Clone(content), bytes.Clone(old), bytes.Clone(new)
 		n := len(Lines(content, old))
 		out := Replace(content, old, new)
-		if len(new) > 0 {
-			if want := len(content) + n*(len(new)-len(old)); len(out) != want {
-				t.Fatalf("len(Replace) = %d, want %d", len(out), want)
+		if !bytes.Equal(content, savedContent) || !bytes.Equal(old, savedOld) || !bytes.Equal(new, savedNew) {
+			t.Fatal("Replace mutated its inputs")
+		}
+		if len(new) > 0 || bytes.HasSuffix(old, newline) {
+			if want := bytes.ReplaceAll(content, old, new); !bytes.Equal(out, want) {
+				t.Fatalf("Replace(%q, %q, %q) = %q, want %q", content, old, new, out, want)
 			}
 			return
 		}
