@@ -40,8 +40,12 @@ const (
 // file is rewritten.
 func Lines(content, old []byte) []int {
 	var lines []int
+	line, from := 1, 0
 	for _, pos := range offsets(content, old) {
-		lines = append(lines, bytes.Count(content[:pos], newline)+1)
+		line += bytes.Count(content[from:pos], newline)
+		lines = append(lines, line)
+		// Include line breaks inside old when counting toward the next match.
+		from = pos
 	}
 	return lines
 }
