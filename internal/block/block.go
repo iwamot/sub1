@@ -97,6 +97,68 @@ func Split(input, sep []byte) (Blocks, error) {
 	return Blocks{Old: oldText, New: newText}, nil
 }
 
+// SplitPairs parses input as one or more pairs written one after another,
+// each OLD, sep, NEW, sep. It is what --pairs reads.
+//
+// The pairs are cut by position: the input has to end with sep and hold an
+// even number of sep lines, and every two of them close one pair. An input
+// the shell cut short ends before a closing sep wherever the cut falls, so
+// the check that catches it is the same however many pairs there are. Each
+// pair is held to what Split holds a single one to, and two pairs with the
+// same old block are refused, since both would claim the same text.
+//
+// A content line that equals sep cannot be told from a separator here any
+// more than in Split. An odd count is refused like several separators are
+// there; an even one is read as pairs, which is the reason this grammar is
+// only read when the caller asked for it.
+func SplitPairs(input, sep []byte) ([]Blocks, error) {
+	if len(input) == 0 {
+		return nil, fmt.Errorf("no input on stdin; pass the old and new blocks as a heredoc (see --help)")
+	}
+	lines := bytes.Split(bytes.TrimSuffix(input, newline), newline)
+	last := len(lines) - 1
+	var at []int
+	for i, line := range lines {
+		if bytes.Equal(line, sep) {
+			at = append(at, i)
+		}
+	}
+	if !bytes.Equal(lines[last], sep) {
+		if n := nearlySep(lines, sep); n > 0 {
+			return nil, trailingWhitespace(n, sep)
+		}
+		if len(at) == 0 {
+			return nil, fmt.Errorf("no %q line found; if a content line equals the heredoc terminator, use another terminator", sep)
+		}
+		return nil, fmt.Errorf("input does not end with a %q line; if a content line equals the heredoc terminator, use another terminator", sep)
+	}
+	if len(at)%2 != 0 {
+		free := freeSeparator(lines, sep)
+		return nil, fmt.Errorf("found %d %q lines, expected an even number with --pairs, two for each pair; if a content line equals %q, pass -d '%s' and write %s on every separator line", len(at), sep, sep, free, free)
+	}
+	pairs := make([]Blocks, 0, len(at)/2)
+	start := 0
+	for k := 0; k < len(at); k += 2 {
+		n := k/2 + 1
+		oldText := bytes.Join(lines[start:at[k]], newline)
+		newText := bytes.Join(lines[at[k]+1:at[k+1]], newline)
+		if len(oldText) == 0 {
+			return nil, fmt.Errorf("pair %d: old block is empty; put at least one line before its first %q line", n, sep)
+		}
+		if bytes.Equal(oldText, newText) {
+			return nil, fmt.Errorf("pair %d: old and new blocks are identical", n)
+		}
+		for j, p := range pairs {
+			if bytes.Equal(p.Old, oldText) {
+				return nil, fmt.Errorf("pair %d and pair %d have the same old block; remove one of them", j+1, n)
+			}
+		}
+		pairs = append(pairs, Blocks{Old: oldText, New: newText})
+		start = at[k+1] + 1
+	}
+	return pairs, nil
+}
+
 // trailingWhitespace names a line that was meant to be a separator. The line
 // number is what the caller needs; the rest of the input is described by
 // whichever check called this.

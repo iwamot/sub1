@@ -20,16 +20,16 @@ func TestParseArgs(t *testing.T) {
 		wantErr string
 	}{
 		{"file only", []string{"f.txt"}, with(func(a *cliArgs) { a.path = "f.txt" }), ""},
-		{"count before file", []string{"-n", "3", "f.txt"}, with(func(a *cliArgs) { a.expected = 3; a.path = "f.txt" }), ""},
-		{"count after file", []string{"f.txt", "-n", "3"}, with(func(a *cliArgs) { a.expected = 3; a.path = "f.txt" }), ""},
+		{"count before file", []string{"-n", "3", "f.txt"}, with(func(a *cliArgs) { a.expected = 3; a.countGiven = true; a.path = "f.txt" }), ""},
+		{"count after file", []string{"f.txt", "-n", "3"}, with(func(a *cliArgs) { a.expected = 3; a.countGiven = true; a.path = "f.txt" }), ""},
 		{"separator", []string{"-d", "%%", "f.txt"}, with(func(a *cliArgs) { a.separator = "%%"; a.path = "f.txt" }), ""},
-		{"both flags", []string{"f.txt", "-d", "%%", "-n", "2"}, with(func(a *cliArgs) { a.separator = "%%"; a.expected = 2; a.path = "f.txt" }), ""},
+		{"both flags", []string{"f.txt", "-d", "%%", "-n", "2"}, with(func(a *cliArgs) { a.separator = "%%"; a.expected = 2; a.countGiven = true; a.path = "f.txt" }), ""},
 		{"help short", []string{"-h"}, with(func(a *cliArgs) { a.showHelp = true }), ""},
 		{"help long", []string{"--help"}, with(func(a *cliArgs) { a.showHelp = true }), ""},
 		{"version short", []string{"-v"}, with(func(a *cliArgs) { a.showVersion = true }), ""},
 		{"version long", []string{"--version"}, with(func(a *cliArgs) { a.showVersion = true }), ""},
 		{"instructions", []string{"--instructions"}, with(func(a *cliArgs) { a.showInstructions = true }), ""},
-		{"dash-dash before file", []string{"-n", "2", "--", "-f.txt"}, with(func(a *cliArgs) { a.expected = 2; a.path = "-f.txt" }), ""},
+		{"dash-dash before file", []string{"-n", "2", "--", "-f.txt"}, with(func(a *cliArgs) { a.expected = 2; a.countGiven = true; a.path = "-f.txt" }), ""},
 		{"dash-dash after file", []string{"f.txt", "--"}, with(func(a *cliArgs) { a.path = "f.txt" }), ""},
 		{"dash-dash alone", []string{"--"}, cliArgs{}, "no file given"},
 		{"dash-dash then two files", []string{"--", "a", "b"}, cliArgs{}, "multiple files"},
@@ -44,6 +44,10 @@ func TestParseArgs(t *testing.T) {
 		{"count not a number", []string{"-n", "x", "f.txt"}, cliArgs{}, "positive integer"},
 		{"separator missing value", []string{"f.txt", "-d"}, cliArgs{}, "-d needs a value"},
 		{"separator empty", []string{"-d", "", "f.txt"}, cliArgs{}, "non-empty"},
+		{"pairs", []string{"--pairs", "f.txt"}, with(func(a *cliArgs) { a.pairs = true; a.path = "f.txt" }), ""},
+		{"pairs with separator", []string{"f.txt", "--pairs", "-d", "%%"}, with(func(a *cliArgs) { a.pairs = true; a.separator = "%%"; a.path = "f.txt" }), ""},
+		{"pairs with count", []string{"--pairs", "-n", "2", "f.txt"}, cliArgs{}, "-n cannot be used with --pairs"},
+		{"count with pairs", []string{"-n", "1", "f.txt", "--pairs"}, cliArgs{}, "-n cannot be used with --pairs"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -674,5 +678,124 @@ func TestRun_version(t *testing.T) {
 		if strings.TrimSpace(r.stdout) == "" {
 			t.Errorf("%s: version output empty", flag)
 		}
+	}
+}
+
+func TestRun_pairsReplaceEveryPairInOneWrite(t *testing.T) {
+	path := writeTemp(t, "a\nb\nc\nd\n")
+	r := runWith([]string{"--pairs", path}, "a\n====\nA\n====\nc\n====\nC1\nC2\n====\n")
+	if r.code != exitOK || r.stderr != "" {
+		t.Fatalf("exit = %d, stderr = %q", r.code, r.stderr)
+	}
+	if want := path + ": pair 1: replaced at line 1\n" + path + ": pair 2: replaced at line 3\n"; r.stdout != want {
+		t.Errorf("stdout = %q, want %q", r.stdout, want)
+	}
+	if got, want := readBack(t, path), "A\nb\nC1\nC2\nd\n"; got != want {
+		t.Errorf("file = %q, want %q", got, want)
+	}
+}
+
+func TestRun_pairsReportLinesInTheFileAsGiven(t *testing.T) {
+	// Pair 1 adds lines above pair 2's match, and pair 2's new block holds
+	// pair 1's old block: both are judged against the file as it was.
+	path := writeTemp(t, "x\ny\n")
+	r := runWith([]string{"--pairs", path}, "x\n====\nx1\nx2\nx3\n====\ny\n====\nx\n====\n")
+	if r.code != exitOK {
+		t.Fatalf("exit = %d, stderr = %q", r.code, r.stderr)
+	}
+	if want := path + ": pair 1: replaced at line 1\n" + path + ": pair 2: replaced at line 2\n"; r.stdout != want {
+		t.Errorf("stdout = %q, want %q", r.stdout, want)
+	}
+	if got, want := readBack(t, path), "x1\nx2\nx3\nx\n"; got != want {
+		t.Errorf("file = %q, want %q", got, want)
+	}
+}
+
+func TestRun_pairsDeleteWholeLines(t *testing.T) {
+	path := writeTemp(t, "a\nb\nc\n")
+	r := runWith([]string{"--pairs", path}, "a\n====\n====\nb\n====\n====\n")
+	if r.code != exitOK {
+		t.Fatalf("exit = %d, stderr = %q", r.code, r.stderr)
+	}
+	if got, want := readBack(t, path), "c\n"; got != want {
+		t.Errorf("file = %q, want %q", got, want)
+	}
+}
+
+func TestRun_pairsInCRLFFile(t *testing.T) {
+	path := writeTemp(t, "a\r\nb\r\nc\r\n")
+	r := runWith([]string{"--pairs", path}, "a\n====\nA\n====\nb\nc\n====\nB\n====\n")
+	if r.code != exitOK {
+		t.Fatalf("exit = %d, stderr = %q", r.code, r.stderr)
+	}
+	if want := path + ": pair 1: replaced at line 1 (CRLF)\n" + path + ": pair 2: replaced at line 2 (CRLF)\n"; r.stdout != want {
+		t.Errorf("stdout = %q, want %q", r.stdout, want)
+	}
+	if got, want := readBack(t, path), "A\r\nB\r\n"; got != want {
+		t.Errorf("file = %q, want %q", got, want)
+	}
+}
+
+func TestRun_pairsReportEveryFailingPairAndWriteNothing(t *testing.T) {
+	content := "keep\nfoo\nfoo\nbar\n"
+	path := writeTemp(t, content)
+	r := runWith([]string{"--pairs", path}, "keep\n====\nKEEP\n====\nfoo\n====\nFOO\n====\nmissing\n====\nM\n====\n")
+	if r.code != exitMismatch || r.stdout != "" {
+		t.Fatalf("exit = %d, stdout = %q", r.code, r.stdout)
+	}
+	for _, want := range []string{
+		"sub1: " + path + ": pair 2: old block found 2 times (lines 2, 3), expected 1; widen the old block to match only 1, or replace all 2 in a call of its own with -n 2\n",
+		"sub1: " + path + ": pair 3: old block found 0 times, expected 1",
+	} {
+		if !strings.Contains(r.stderr, want) {
+			t.Errorf("stderr = %q, want containing %q", r.stderr, want)
+		}
+	}
+	if strings.Contains(r.stderr, "pair 1") || strings.Contains(r.stderr, "-n 2 to replace") {
+		t.Errorf("stderr = %q", r.stderr)
+	}
+	if got := readBack(t, path); got != content {
+		t.Errorf("file = %q, want it untouched", got)
+	}
+}
+
+func TestRun_pairsThatOverlapWriteNothing(t *testing.T) {
+	content := "one\ntwo three\nfour\n"
+	path := writeTemp(t, content)
+	r := runWith([]string{"--pairs", path}, "three\nfour\n====\nx\n====\ntwo three\n====\ny\n====\n")
+	want := "sub1: " + path + ": pair 2 overlaps pair 1 at line 2; shorten one of the two old blocks so they do not share text\n"
+	if r.code != exitMismatch || r.stderr != want {
+		t.Fatalf("exit = %d, stderr = %q, want %q", r.code, r.stderr, want)
+	}
+	if got := readBack(t, path); got != content {
+		t.Errorf("file = %q, want it untouched", got)
+	}
+}
+
+func TestRun_pairsInputErrorsNameNoFile(t *testing.T) {
+	path := writeTemp(t, "a\nb\n")
+	for _, tt := range []struct {
+		argv        []string
+		stdin, want string
+	}{
+		{[]string{"--pairs", path}, "a\n====\nA\n====\na\n====\nB\n====\n", "sub1: pair 1 and pair 2 have the same old block; remove one of them\n"},
+		{[]string{"--pairs", path}, "a\n====\nA\n====\nb\n====\n", "sub1: found 3 \"====\" lines, expected an even number with --pairs, two for each pair; if a content line equals \"====\", pass -d '%%%%' and write %%%% on every separator line\n"},
+		{[]string{"--pairs", "-n", "2", path}, "a\n====\nA\n====\n", "sub1: -n cannot be used with --pairs; replace a block that occurs more than once in a call of its own with -n\n"},
+	} {
+		r := runWith(tt.argv, tt.stdin)
+		if r.code != exitUsage || r.stderr != tt.want {
+			t.Errorf("%q: exit = %d, stderr = %q, want %q", tt.stdin, r.code, r.stderr, tt.want)
+		}
+	}
+	if got := readBack(t, path); got != "a\nb\n" {
+		t.Errorf("file = %q, want it untouched", got)
+	}
+}
+
+func TestRun_withoutPairsSeveralPairsAreStillRefused(t *testing.T) {
+	path := writeTemp(t, "a\nb\n")
+	r := runWith([]string{path}, "a\n====\nA\n====\nb\n====\nB\n====\n")
+	if r.code != exitUsage || !strings.Contains(r.stderr, `found 4 "====" lines, expected 2`) {
+		t.Fatalf("exit = %d, stderr = %q", r.code, r.stderr)
 	}
 }

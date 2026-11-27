@@ -59,7 +59,7 @@ To replace part of a file from the shell, use `sub1` instead of sed or an ad-hoc
     ====
     SUB1
 
-The file is rewritten only when the old block occurs exactly once. Otherwise nothing is written and the message says what to do next. See `sub1 --help` for options.
+The file is rewritten only when the old block occurs exactly once. Otherwise nothing is written and the message says what to do next. To change several places in one file, pass `--pairs` and write the old/new pairs one after another. See `sub1 --help` for options.
 ```
 
 That paragraph is all the agent needs; everything else it has to know arrives in the output of the call that needed it. `sub1 --instructions` prints the same paragraph, for setup scripts and machines where this page is not at hand.
@@ -173,6 +173,47 @@ SUB1
 handlers.py: replaced at line 1
 ```
 
+Several places in one file, in one call. With `--pairs` the pairs follow one another, and each gets its own line, numbered in the order they were written:
+
+```
+$ sub1 --pairs handlers.py <<'SUB1'
+def _tool_chunks(chunks):
+====
+def tool_chunks(chunks):
+====
+    return _tool_chunks(sys.argv)
+====
+    return tool_chunks(sys.argv)
+====
+import os
+====
+====
+SUB1
+handlers.py: pair 1: replaced at line 5
+handlers.py: pair 2: replaced at line 10
+handlers.py: pair 3: replaced at line 1
+```
+
+Every pair is matched against the file as it was before the call, and the file is written once, after all of them are settled. A pair that does not match exactly once stops the whole call, nothing is written, and every pair that failed is reported in the shape a single block gets, with its number:
+
+```
+$ sub1 --pairs handlers.py <<'SUB1'
+import sys
+====
+import sys
+import json
+====
+    return tool_chunks(sys.argv)
+====
+    return tool_chunks(sys.argv[1:])
+====
+SUB1
+sub1: handlers.py: pair 2: old block found 0 times, expected 1
+  hint: file line 10 starts with 1 tab, old block line 1 with 4 spaces (near line 10)
+```
+
+Two pairs whose old blocks share text in the file are refused the same way, since both would rewrite it: `sub1: handlers.py: pair 2 overlaps pair 1 at line 5; shorten one of the two old blocks so they do not share text`. Every pair is expected exactly once, so `-n` does not go with `--pairs`; a block that occurs several times gets a call of its own with `-n`.
+
 ## Reference
 
 ```
@@ -180,7 +221,7 @@ $ sub1 --help
 sub1 — replace a literal text block in a file, exactly once.
 
 Usage:
-  sub1 [-n N] [-d SEP] [--] FILE <<'SUB1'
+  sub1 [-n N | --pairs] [-d SEP] [--] FILE <<'SUB1'
   old text (one or more lines)
   ====
   new text (zero or more lines)
@@ -224,17 +265,17 @@ Examples:
 Options:
   -n N            expect OLD N times and replace all N (default 1)
   -d SEP          line that ends OLD and ends NEW (default "====")
+  --pairs         read several OLD/NEW pairs in a row, each OLD exactly once
   -h, --help      show this help
   -v, --version   show the version
   --instructions  print the paragraph for the agent's instruction file
 
 Notes:
-  "(...)" after "replaced at line N" is a note, not an error: a fact about
-  where a match sits, or "(CRLF)". Check the edit if a note was unexpected.
+  "(...)" after "replaced at line N" is a note, not an error: check the edit.
 
 Exit codes:
   0  replaced
-  1  OLD found a different number of times than expected
+  1  OLD found a different number of times than expected, or pairs overlap
   2  input error: the flags or the blocks on stdin
   3  file error: stdin or FILE could not be read, or FILE could not be written
 ```
@@ -244,6 +285,7 @@ Exit codes:
 - An empty new block deletes the old block. When the old block is a whole line or a run of whole lines, the line break after it goes too, so the lines disappear instead of leaving a blank line behind. An old block that starts or ends in the middle of a line leaves that line's break where it is, and an old block that ends with a blank line takes nothing beyond it. Deleting a last line that has no line break leaves the file ending with the line break of the line before it.
 - The closing `====` line is required. A heredoc ends at the first line equal to its terminator, so a terminator written on the separator line by mistake, or one that also appears inside a block, ends the heredoc early. The input that reaches `sub1` then stops before the closing line, and it is rejected instead of being applied as if it were whole. What the shell cut off, though, it runs as commands, so pick a terminator the blocks cannot contain: a file that quotes `sub1` holds lines that are exactly `SUB1` — this page, the `CLAUDE.md` you pasted the paragraph into, test fixtures — and editing one of those with `<<'SUB1'` ends the heredoc on the wrong line.
 - If either block contains a line that is exactly `====` (a Markdown setext underline, or a quoted `sub1` call, for example), pass another separator with `-d`. The message that rejects such an input names one that no line of the input holds, ready to paste.
+- With `--pairs`, the pairs are cut by position: every two separator lines close one pair, so the count has to be even. A content line that equals the separator cannot be told from one here either, and an even count would be read as pairs other than the ones meant, so pick a separator with `-d` that no line of any block holds. Each pair is held to the rules for a single pair, two pairs may not have the same old block, and an empty new block deletes whole lines as it does on its own. Whether a deletion takes the line break after it is decided against the file as given: deleting the two halves of one line in two pairs leaves the line break, where two separate calls would remove it.
 - The file is never left half-written, and nothing is written at all until the replacement is settled. Every error above leaves the file byte for byte as it was. The new contents go to a temporary `.sub1-*` file next to it, which is then renamed into place. If `sub1` is interrupted, the file still has either the old or the new contents, and any leftover `.sub1-*` file can be deleted. On Linux and macOS the rename swaps the file in one step. On Windows it goes through `MoveFileEx`, which Windows does not document as atomic.
 - Because of that rename, the file that ends up in place is a new one. Its permissions are copied over from the old file; its owner, ACLs and extended attributes are not, so it belongs to the user who ran `sub1`. The directory must be writable, and hard links to the file are not preserved.
 - The file is not locked. A write another program makes between `sub1` reading the file and renaming the new contents into place is lost.
@@ -259,6 +301,9 @@ The shapes below are stable. Later versions may add to them; they will not rewor
 | stderr, wrong count, second line | `  hint: <what the file has> (near line N)`, with `lines N, M, ...` in place of `line N` where more than one place is named. It follows a count that fell short when something in the file comes close, and a count that was too high when the places can be told apart |
 | stderr, input error (exit 2) | `sub1: <what is wrong>`. No FILE: the command is what has to change, not the file |
 | stderr, file error (exit 3) | `sub1: FILE: <what is wrong>`, with `stdin` in the place of `FILE` when stdin is what could not be read |
+| stdout, `--pairs`, replaced | one line per pair, in input order: `FILE: pair K: replaced at line N` or `FILE: pair K: replaced at lines N, M, ...` |
+| stderr, `--pairs`, wrong count (exit 1) | one count line per failing pair, `sub1: FILE: pair K: old block found ...` as for a single block, each followed by its own hint line when there is one |
+| stderr, `--pairs`, overlap (exit 1) | `sub1: FILE: pair K overlaps pair J at line N` |
 
 `FILE` is the path as it was given on the command line, in every line above.
 

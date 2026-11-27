@@ -38,7 +38,7 @@ const defaultSeparator = "===="
 const helpText = `sub1 — replace a literal text block in a file, exactly once.
 
 Usage:
-  sub1 [-n N] [-d SEP] [--] FILE <<'SUB1'
+  sub1 [-n N | --pairs] [-d SEP] [--] FILE <<'SUB1'
   old text (one or more lines)
   ====
   new text (zero or more lines)
@@ -82,17 +82,17 @@ Examples:
 Options:
   -n N            expect OLD N times and replace all N (default 1)
   -d SEP          line that ends OLD and ends NEW (default "====")
+  --pairs         read several OLD/NEW pairs in a row, each OLD exactly once
   -h, --help      show this help
   -v, --version   show the version
   --instructions  print the paragraph for the agent's instruction file
 
 Notes:
-  "(...)" after "replaced at line N" is a note, not an error: a fact about
-  where a match sits, or "(CRLF)". Check the edit if a note was unexpected.
+  "(...)" after "replaced at line N" is a note, not an error: check the edit.
 
 Exit codes:
   0  replaced
-  1  OLD found a different number of times than expected
+  1  OLD found a different number of times than expected, or pairs overlap
   2  input error: the flags or the blocks on stdin
   3  file error: stdin or FILE could not be read, or FILE could not be written
 `
@@ -118,7 +118,7 @@ const instructionsText = "To replace part of a file from the shell, use `sub1` i
 	"    ====\n" +
 	"    SUB1\n" +
 	"\n" +
-	"The file is rewritten only when the old block occurs exactly once. Otherwise nothing is written and the message says what to do next. See `sub1 --help` for options.\n"
+	"The file is rewritten only when the old block occurs exactly once. Otherwise nothing is written and the message says what to do next. To change several places in one file, pass `--pairs` and write the old/new pairs one after another. See `sub1 --help` for options.\n"
 
 // errMultipleFiles is worded once because parseArgs reaches it from both
 // sides of "--".
@@ -129,6 +129,8 @@ type cliArgs struct {
 	showVersion      bool
 	showInstructions bool
 	expected         int
+	countGiven       bool
+	pairs            bool
 	separator        string
 	path             string
 }
@@ -155,6 +157,8 @@ func parseArgs(argv []string) (cliArgs, error) {
 			a.showVersion = true
 		case "--instructions":
 			a.showInstructions = true
+		case "--pairs":
+			a.pairs = true
 		case "-n", "-d":
 			if i+1 >= len(argv) {
 				return cliArgs{}, fmt.Errorf("%s needs a value", arg)
@@ -173,6 +177,7 @@ func parseArgs(argv []string) (cliArgs, error) {
 				return cliArgs{}, fmt.Errorf("-n needs a positive integer, got %q", value)
 			}
 			a.expected = n
+			a.countGiven = true
 		default:
 			if strings.HasPrefix(arg, "-") {
 				return cliArgs{}, fmt.Errorf("unknown flag: %s; see --help for the flags", arg)
@@ -185,6 +190,13 @@ func parseArgs(argv []string) (cliArgs, error) {
 	}
 	if a.path == "" && !a.showHelp && !a.showVersion && !a.showInstructions {
 		return cliArgs{}, fmt.Errorf("no file given; pass the file to edit as the last argument")
+	}
+	// Each pair is expected once. One -n for all of them would almost never
+	// be right, since the pairs that need it rarely need the same count, and
+	// refusing the two together leaves room to give each pair its own count
+	// later without changing what a call means now.
+	if a.pairs && a.countGiven {
+		return cliArgs{}, fmt.Errorf("-n cannot be used with --pairs; replace a block that occurs more than once in a call of its own with -n")
 	}
 	return a, nil
 }
@@ -250,6 +262,120 @@ func bare(err error) error {
 	return err
 }
 
+// readTarget reads the file to edit. A file that is there but cannot be read
+// fails with the same words as one that cannot be written, so this one names
+// the operation. The other read failures — no such file, a directory — say
+// what is wrong on their own, and naming the operation would only pad them.
+func readTarget(path string) ([]byte, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, fs.ErrPermission) {
+			err = fmt.Errorf("cannot read the file: %w", bare(err))
+		}
+		return nil, fileError(path, err)
+	}
+	return content, nil
+}
+
+// mismatchLines reports one count that is not the expected one: the count
+// line that count builds, and the hint that may follow it.
+func mismatchLines(count func(hinted bool) string, content, old, lfOld []byte, lines []int, expected int, asCRLF bool) []string {
+	// The hint is worked out first: a count line that is followed by one
+	// leaves out the suggestion to read the file that it would otherwise
+	// end with.
+	hint := ""
+	if len(lines) < expected {
+		// Mask takes the occurrences that were found out of the way, before
+		// the fold, so that the hint describes what is missing rather than a
+		// match that is already there.
+		hintContent := occur.Mask(content, old)
+		if asCRLF {
+			hintContent = crlf.ToLF(hintContent)
+		}
+		hint = occur.Hint(hintContent, lfOld)
+	} else {
+		// Nothing is missing here. What helps instead is telling the places
+		// that were found apart, to widen the block around one.
+		hint = occur.Surroundings(content, old)
+	}
+	out := []string{"sub1: " + count(hint != "")}
+	if hint != "" {
+		out = append(out, "  hint: "+hint)
+	}
+	return out
+}
+
+// runPairs is run for --pairs: every pair is checked against the file as it
+// is, and the file is written once, only when every old block occurs exactly
+// once and no two of them share text. A pair that fails is reported with its
+// number and the report a single replacement would give, and every failing
+// pair is reported, so that one call says all there is to fix.
+func runPairs(a cliArgs, input []byte, stdout, stderr io.Writer) int {
+	pairs, err := block.SplitPairs(input, []byte(a.separator))
+	if err != nil {
+		fmt.Fprintln(stderr, "sub1:", err)
+		return exitUsage
+	}
+	content, err := readTarget(a.path)
+	if err != nil {
+		fmt.Fprintln(stderr, "sub1:", err)
+		return exitFile
+	}
+	asCRLF := crlf.Uniform(content)
+	for _, p := range pairs {
+		if bytes.ContainsRune(p.Old, '\r') || bytes.ContainsRune(p.New, '\r') {
+			asCRLF = false
+		}
+	}
+	type pair struct {
+		label    string
+		old, new []byte
+		lines    []int
+	}
+	checked := make([]pair, len(pairs))
+	var report []string
+	for i, p := range pairs {
+		old, new := p.Old, p.New
+		if asCRLF {
+			old, new = crlf.ToCRLF(old), crlf.ToCRLF(new)
+		}
+		label := fmt.Sprintf("%s: pair %d", a.path, i+1)
+		lines := occur.Lines(content, old)
+		checked[i] = pair{label, old, new, lines}
+		if len(lines) != 1 {
+			count := func(hinted bool) string { return occur.PairMismatch(label, lines, hinted) }
+			report = append(report, mismatchLines(count, content, old, p.Old, lines, 1, asCRLF)...)
+		}
+	}
+	if len(report) > 0 {
+		fmt.Fprintln(stderr, strings.Join(report, "\n"))
+		return exitMismatch
+	}
+	sets := make([][]occur.Edit, len(checked))
+	for i, p := range checked {
+		sets[i] = occur.Edits(content, p.old, p.new)
+	}
+	edits, overlap := occur.Merge(content, sets)
+	if overlap != nil {
+		fmt.Fprintf(stderr, "sub1: %s: pair %d overlaps pair %d at line %d; shorten one of the two old blocks so they do not share text\n",
+			a.path, overlap.Second+1, overlap.First+1, overlap.Line)
+		return exitMismatch
+	}
+	if err := atomicfile.WriteFile(a.path, occur.Apply(content, edits)); err != nil {
+		fmt.Fprintln(stderr, "sub1:", fileError(a.path, err))
+		return exitFile
+	}
+	for _, p := range checked {
+		var notes []string
+		if asCRLF {
+			notes = append(notes, "CRLF")
+		}
+		notes = append(notes, occur.Notes(content, p.old, p.new)...)
+		fmt.Fprintln(stdout, occur.Summary(p.label, p.lines, notes))
+	}
+	return exitOK
+}
+
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
 }
@@ -286,22 +412,18 @@ func run(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "sub1:", fileError("stdin", err))
 		return exitFile
 	}
+	if a.pairs {
+		return runPairs(a, input, stdout, stderr)
+	}
 	blocks, err := block.Split(input, []byte(a.separator))
 	if err != nil {
 		fmt.Fprintln(stderr, "sub1:", err)
 		return exitUsage
 	}
 
-	content, err := os.ReadFile(a.path)
+	content, err := readTarget(a.path)
 	if err != nil {
-		// A file that is there but cannot be read fails with the same words
-		// as one that cannot be written, so this one names the operation.
-		// The other read failures — no such file, a directory — say what is
-		// wrong on their own, and naming the operation would only pad them.
-		if errors.Is(err, fs.ErrPermission) {
-			err = fmt.Errorf("cannot read the file: %w", bare(err))
-		}
-		fmt.Fprintln(stderr, "sub1:", fileError(a.path, err))
+		fmt.Fprintln(stderr, "sub1:", err)
 		return exitFile
 	}
 	// The blocks come from a heredoc and end their lines with LF. A file
@@ -316,28 +438,8 @@ func run(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 	lines := occur.Lines(content, old)
 	if len(lines) != a.expected {
-		// The hint is worked out first: a count line that is followed by one
-		// leaves out the suggestion to read the file that it would otherwise
-		// end with.
-		hint := ""
-		if len(lines) < a.expected {
-			// Mask takes the occurrences that were found out of the way,
-			// before the fold, so that the hint describes what is missing
-			// rather than a match that is already there.
-			hintContent := occur.Mask(content, old)
-			if asCRLF {
-				hintContent = crlf.ToLF(hintContent)
-			}
-			hint = occur.Hint(hintContent, blocks.Old)
-		} else {
-			// Nothing is missing here. What helps instead is telling the
-			// places that were found apart, to widen the block around one.
-			hint = occur.Surroundings(content, old)
-		}
-		fmt.Fprintln(stderr, "sub1:", occur.Mismatch(a.path, lines, a.expected, hint != ""))
-		if hint != "" {
-			fmt.Fprintf(stderr, "  hint: %s\n", hint)
-		}
+		count := func(hinted bool) string { return occur.Mismatch(a.path, lines, a.expected, hinted) }
+		fmt.Fprintln(stderr, strings.Join(mismatchLines(count, content, old, blocks.Old, lines, a.expected, asCRLF), "\n"))
 		return exitMismatch
 	}
 	if err := atomicfile.WriteFile(a.path, occur.Replace(content, old, new)); err != nil {
