@@ -7,33 +7,8 @@ import (
 	"testing"
 )
 
-func TestLines(t *testing.T) {
-	tests := []struct {
-		name    string
-		content string
-		old     string
-		want    []int
-	}{
-		{"absent", "a\nb\n", "z", nil},
-		{"first line", "foo\nbar\n", "foo", []int{1}},
-		{"later line", "a\nfoo\nb\n", "foo", []int{2}},
-		{"mid-line match reports its line", "a\n  x = foo()\n", "foo", []int{2}},
-		{"several occurrences", "x(1)\ny\nx(2)\nx(3)\n", "x(", []int{1, 3, 4}},
-		{"two on one line count separately", "ab ab\n", "ab", []int{1, 1}},
-		{"multi-line block", "a\nb\nc\nb\nc\n", "b\nc", []int{2, 4}},
-		{"overlapping candidates are not double counted", "aaa\n", "aa", []int{1}},
-		{"no trailing newline", "abc", "c", []int{1}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := Lines([]byte(tt.content), []byte(tt.old))
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("Lines = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
+// Deletion, which has rules of its own. Replace with a new block that is not
+// empty is bytes.ReplaceAll, a property in oracle_test.go.
 func TestReplace(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -42,11 +17,6 @@ func TestReplace(t *testing.T) {
 		new     string
 		want    string
 	}{
-		{"absent", "a\nb\n", "z", "y", "a\nb\n"},
-		{"replaces every occurrence", "x(1)\ny\nx(2)\n", "x(", "z(", "z(1)\ny\nz(2)\n"},
-		{"replacement is literal", "a\nb\n", "b", "\n", "a\n\n\n"},
-		{"overlapping candidates are not double replaced", "aaa\n", "aa", "b", "ba\n"},
-
 		{"empty new deletes the whole line", "a\nb\nc\n", "b", "", "a\nc\n"},
 		{"empty new deletes a CRLF line", "a\r\nb\r\nc\r\n", "b", "", "a\r\nc\r\n"},
 		{"empty new deletes the line break the file has", "a\r\nb\nc\r\n", "b", "", "a\r\nc\r\n"},
@@ -63,37 +33,6 @@ func TestReplace(t *testing.T) {
 			got := Replace([]byte(tt.content), []byte(tt.old), []byte(tt.new))
 			if string(got) != tt.want {
 				t.Errorf("Replace = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestMask(t *testing.T) {
-	tests := []struct {
-		name    string
-		content string
-		old     string
-		want    string
-	}{
-		{"nothing to mask", "a\nb\n", "z", "a\nb\n"},
-		{"one occurrence", "a\nb\n", "b", "a\n\x00\n"},
-		{"line breaks inside an occurrence are kept", "a\nb\nc\n", "a\nb", "\x00\n\x00\nc\n"},
-		{"CRLF inside an occurrence is kept", "a\r\nb\r\n", "a\r\nb", "\x00\r\n\x00\r\n"},
-		{"every occurrence", "x\ny\nx\n", "x", "\x00\ny\n\x00\n"},
-		{"part of a line", "foo bar\n", "foo ", "\x00\x00\x00\x00bar\n"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			content := []byte(tt.content)
-			got := Mask(content, []byte(tt.old))
-			if string(got) != tt.want {
-				t.Errorf("Mask = %q, want %q", got, tt.want)
-			}
-			if string(content) != tt.content {
-				t.Errorf("content changed to %q", content)
-			}
-			if bytes.Count(got, newline) != bytes.Count(content, newline) {
-				t.Errorf("line count changed: %q", got)
 			}
 		})
 	}
