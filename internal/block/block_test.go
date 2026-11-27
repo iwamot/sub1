@@ -1,62 +1,21 @@
 package block
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 )
 
-func TestSplit(t *testing.T) {
+// The rejections, each with the message it owes the caller. What Split reads
+// from well-formed input is a property, below.
+func TestSplitRejects(t *testing.T) {
 	sep := []byte("====")
 	tests := []struct {
 		name    string
 		input   string
 		sep     []byte
-		wantOld string
-		wantNew string
 		wantErr string
 	}{
-		{
-			name:    "single lines",
-			input:   "foo\n====\nbar\n====\n",
-			sep:     sep,
-			wantOld: "foo",
-			wantNew: "bar",
-		},
-		{
-			name:    "multi-line blocks keep inner newlines and indentation",
-			input:   "  if x:\n    return\n====\n  if x:\n    return None\n====\n",
-			sep:     sep,
-			wantOld: "  if x:\n    return",
-			wantNew: "  if x:\n    return None",
-		},
-		{
-			name:    "empty new block deletes",
-			input:   "gone\n====\n====\n",
-			sep:     sep,
-			wantOld: "gone",
-			wantNew: "",
-		},
-		{
-			name:    "no trailing newline after new block",
-			input:   "a\n====\nb\n====",
-			sep:     sep,
-			wantOld: "a",
-			wantNew: "b",
-		},
-		{
-			name:    "blank line inside old block is kept",
-			input:   "a\n\nb\n====\nc\n====\n",
-			sep:     sep,
-			wantOld: "a\n\nb",
-			wantNew: "c",
-		},
-		{
-			name:    "custom separator",
-			input:   "Title\n====\n%%\nTitle\n----\n%%\n",
-			sep:     []byte("%%"),
-			wantOld: "Title\n====",
-			wantNew: "Title\n----",
-		},
 		{
 			name:    "closing separator must fill the whole line",
 			input:   "a\n====\nb\n==== \n",
@@ -188,20 +147,8 @@ func TestSplit(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := Split([]byte(tt.input), tt.sep)
-			if tt.wantErr != "" {
-				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
-					t.Fatalf("Split err = %v, want containing %q", err, tt.wantErr)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("Split err = %v", err)
-			}
-			if string(got.Old) != tt.wantOld {
-				t.Errorf("Old = %q, want %q", got.Old, tt.wantOld)
-			}
-			if string(got.New) != tt.wantNew {
-				t.Errorf("New = %q, want %q", got.New, tt.wantNew)
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Split = %q, %v; want an error containing %q", got, err, tt.wantErr)
 			}
 		})
 	}
@@ -220,4 +167,71 @@ func FuzzSplit(f *testing.F) {
 			t.Fatalf("Split(%q, %q) returned an empty old block", input, sep)
 		}
 	})
+}
+
+// splitTexts are the blocks single pairs are built from: those of
+// blockTexts, the blocks the examples above used to spell out (indentation,
+// a blank line inside a block, a Markdown underline), and lines equal to
+// each separator tried, which only another separator can carry.
+var splitTexts = append([]string{
+	"foo", "bar", "gone", "  if x:\n    return", "  if x:\n    return None",
+	"a\n\nb", "Title\n====", "Title\n----", "====", "%%", "——",
+}, blockTexts...)
+
+// A pair written with any separator and any blocks comes back as written,
+// with or without the final line break, unless a block holds a line equal to
+// the separator, the old block is empty, or the blocks are the same: those
+// are refused, for that reason.
+func TestSplitReadsBackWhatWasWritten(t *testing.T) {
+	read := 0
+	for _, sep := range []string{"====", "%%", "——"} {
+		for _, o := range splitTexts {
+			for _, n := range splitTexts {
+				for _, ending := range []string{"\n", ""} {
+					input := []byte(o + "\n" + sep + "\n")
+					if n != "" {
+						input = append(input, n+"\n"...)
+					}
+					input = append(input, sep+ending...)
+					saved := bytes.Clone(input)
+					got, err := Split(input, []byte(sep))
+					if !bytes.Equal(input, saved) {
+						t.Fatalf("%q: input was changed", saved)
+					}
+					var want string
+					switch {
+					case holdsLine(o, sep) || holdsLine(n, sep):
+						want = "lines, expected 2"
+					case o == "":
+						want = "old block is empty"
+					case o == n:
+						want = "identical"
+					}
+					if want != "" {
+						if err == nil || !strings.Contains(err.Error(), want) {
+							t.Fatalf("%q: Split = %q, %v; want an error containing %q", input, got, err, want)
+						}
+						continue
+					}
+					if err != nil || string(got.Old) != o || string(got.New) != n {
+						t.Fatalf("%q: Split = %q, %v; want %q / %q", input, got, err, o, n)
+					}
+					read++
+				}
+			}
+		}
+	}
+	if read == 0 {
+		t.Fatal("no input was read back")
+	}
+}
+
+// holdsLine reports whether any line of block is exactly line.
+func holdsLine(block, line string) bool {
+	for l := range strings.SplitSeq(block, "\n") {
+		if l == line {
+			return true
+		}
+	}
+	return false
 }
