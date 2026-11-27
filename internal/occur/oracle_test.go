@@ -3,6 +3,7 @@ package occur
 import (
 	"bytes"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -124,5 +125,55 @@ func TestMaskBlanksTheMatchesAndKeepsTheLines(t *testing.T) {
 				t.Fatalf("Mask changed %q", saved)
 			}
 		}
+	}
+}
+
+// MaskBefore blanks the first n bytes as Mask blanks a match, line breaks
+// left alone, and leaves the rest as it was.
+func TestMaskBeforeBlanksOnlyThePrefix(t *testing.T) {
+	for _, content := range oracleContents() {
+		for n := 0; n <= len(content); n++ {
+			saved := bytes.Clone(content)
+			got := MaskBefore(content, n)
+			if !bytes.Equal(content, saved) {
+				t.Fatalf("MaskBefore changed %q", saved)
+			}
+			want := bytes.Clone(content)
+			for i := range n {
+				if want[i] != '\n' && want[i] != '\r' {
+					want[i] = 0
+				}
+			}
+			if !bytes.Equal(got, want) {
+				t.Fatalf("MaskBefore(%q, %d) = %q, want %q", content, n, got, want)
+			}
+		}
+	}
+}
+
+// HintAs says what Hint says, with the block called by the name it is given.
+// The contents here hold no "old block" of their own to quote, so every one
+// in the hint is a name.
+func TestHintAsNamesTheBlock(t *testing.T) {
+	contents := append(oracleContents(), []byte("  foo bar\nbaz\n"), []byte("a\nb\nc\nd\n"), []byte("x\r\ny\nz\r\n"))
+	olds := append(oracleOlds(), []byte("foo  bar"), []byte("a\nb\nX\nd"), []byte("x\ny\nz"), []byte("    foo bar"))
+	named := 0
+	for _, content := range contents {
+		for _, old := range olds {
+			if bytes.Contains(content, old) {
+				continue
+			}
+			hint := Hint(content, old)
+			got := HintAs(content, old, "end block")
+			if want := strings.ReplaceAll(hint, "old block", "end block"); got != want {
+				t.Fatalf("HintAs(%q, %q) = %q, want %q", content, old, got, want)
+			}
+			if strings.Contains(hint, "old block") {
+				named++
+			}
+		}
+	}
+	if named == 0 {
+		t.Fatal("no hint named the block")
 	}
 }

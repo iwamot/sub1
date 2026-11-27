@@ -159,6 +159,66 @@ func SplitPairs(input, sep []byte) ([]Blocks, error) {
 	return pairs, nil
 }
 
+// Range is what --range reads: the first lines of the stretch to replace,
+// its last lines, and the text that replaces all of it.
+type Range struct {
+	Start []byte
+	End   []byte
+	New   []byte
+}
+
+// SplitRange parses input as START, sep, END, sep, NEW, sep. It is what
+// --range reads.
+//
+// Exactly three sep lines are taken, the last of them closing the input, for
+// the same reason Split takes exactly two: which of several more was meant as
+// text cannot be told. START and END may not be empty, since each has to be
+// found in the file. NEW may be, and then the stretch is deleted.
+func SplitRange(input, sep []byte) (Range, error) {
+	if len(input) == 0 {
+		return Range{}, fmt.Errorf("no input on stdin; pass the start, end and new blocks as a heredoc (see --help)")
+	}
+	lines := bytes.Split(bytes.TrimSuffix(input, newline), newline)
+	last := len(lines) - 1
+	var at []int
+	for i, line := range lines {
+		if bytes.Equal(line, sep) {
+			at = append(at, i)
+		}
+	}
+	if !bytes.Equal(lines[last], sep) {
+		if n := nearlySep(lines, sep); n > 0 {
+			return Range{}, trailingWhitespace(n, sep)
+		}
+		if len(at) == 0 {
+			return Range{}, fmt.Errorf("no %q line found; if a content line equals the heredoc terminator, use another terminator", sep)
+		}
+		return Range{}, fmt.Errorf("input does not end with a %q line; if a content line equals the heredoc terminator, use another terminator", sep)
+	}
+	switch {
+	case len(at) < 3:
+		if n := nearlySep(lines, sep); n > 0 {
+			return Range{}, trailingWhitespace(n, sep)
+		}
+		return Range{}, fmt.Errorf("found %d %q lines, expected 3 with --range: one after the start block, one after the end block, and one after the new block, even an empty one", len(at), sep)
+	case len(at) > 3:
+		free := freeSeparator(lines, sep)
+		return Range{}, fmt.Errorf("found %d %q lines, expected 3 with --range; if a content line equals %q, pass -d '%s' and write %s on every separator line", len(at), sep, sep, free, free)
+	}
+	r := Range{
+		Start: bytes.Join(lines[:at[0]], newline),
+		End:   bytes.Join(lines[at[0]+1:at[1]], newline),
+		New:   bytes.Join(lines[at[1]+1:at[2]], newline),
+	}
+	if len(r.Start) == 0 {
+		return Range{}, fmt.Errorf("start block is empty; put the first lines of the stretch before the first %q line", sep)
+	}
+	if len(r.End) == 0 {
+		return Range{}, fmt.Errorf("end block is empty; put the last lines of the stretch between the first and second %q lines", sep)
+	}
+	return r, nil
+}
+
 // trailingWhitespace names a line that was meant to be a separator. The line
 // number is what the caller needs; the rest of the input is described by
 // whichever check called this.

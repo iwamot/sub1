@@ -38,7 +38,7 @@ const defaultSeparator = "===="
 const helpText = `sub1 — replace a literal text block in a file, exactly once.
 
 Usage:
-  sub1 [-n N | --pairs] [-d SEP] [--] FILE <<'SUB1'
+  sub1 [-n N | --pairs | --range] [-d SEP] [--] FILE <<'SUB1'
   old text (one or more lines)
   ====
   new text (zero or more lines)
@@ -64,13 +64,13 @@ Examples:
   ====
   SUB1
 
-  sub1 -d @@ README.md <<'SUB1'     # a block holds a "====" line
-  Title
+  sub1 --range notes.md <<'SUB1'    # replace from "## Old" through "## Next"
+  ## Old
   ====
-  @@
-  Title
-  -----
-  @@
+  ## Next
+  ====
+  ## Next
+  ====
   SUB1
 
   sub1 handlers.py <<'SUB1'         # an empty new block deletes the whole line
@@ -83,16 +83,14 @@ Options:
   -n N            expect OLD N times and replace all N (default 1)
   -d SEP          line that ends OLD and ends NEW (default "====")
   --pairs         read several OLD/NEW pairs in a row, each OLD exactly once
+  --range         read START, END, NEW; replace START through the next END
   -h, --help      show this help
   -v, --version   show the version
   --instructions  print the paragraph for the agent's instruction file
 
-Notes:
-  "(...)" after "replaced at line N" is a note, not an error: check the edit.
-
 Exit codes:
-  0  replaced
-  1  OLD found a different number of times than expected, or pairs overlap
+  0  replaced; "(...)" at the end of the line is a note: check the edit
+  1  OLD (or START, END) not found as expected, or pairs overlap
   2  input error: the flags or the blocks on stdin
   3  file error: stdin or FILE could not be read, or FILE could not be written
 `
@@ -118,7 +116,7 @@ const instructionsText = "To replace part of a file from the shell, use `sub1` i
 	"    ====\n" +
 	"    SUB1\n" +
 	"\n" +
-	"The file is rewritten only when the old block occurs exactly once. Otherwise nothing is written and the message says what to do next. To change several places in one file, pass `--pairs` and write the old/new pairs one after another. See `sub1 --help` for options.\n"
+	"The file is rewritten only when the old block occurs exactly once. Otherwise nothing is written and the message says what to do next. To change several places in one file, pass `--pairs` and write the old/new pairs one after another. To replace a long stretch without copying it, pass `--range` and write three blocks: the first lines of the stretch, its last lines, and the text that replaces all of it. See `sub1 --help` for options.\n"
 
 // errMultipleFiles is worded once because parseArgs reaches it from both
 // sides of "--".
@@ -131,6 +129,7 @@ type cliArgs struct {
 	expected         int
 	countGiven       bool
 	pairs            bool
+	rangeMode        bool
 	separator        string
 	path             string
 }
@@ -159,6 +158,8 @@ func parseArgs(argv []string) (cliArgs, error) {
 			a.showInstructions = true
 		case "--pairs":
 			a.pairs = true
+		case "--range":
+			a.rangeMode = true
 		case "-n", "-d":
 			if i+1 >= len(argv) {
 				return cliArgs{}, fmt.Errorf("%s needs a value", arg)
@@ -197,6 +198,15 @@ func parseArgs(argv []string) (cliArgs, error) {
 	// later without changing what a call means now.
 	if a.pairs && a.countGiven {
 		return cliArgs{}, fmt.Errorf("-n cannot be used with --pairs; replace a block that occurs more than once in a call of its own with -n")
+	}
+	// A stretch is one place by definition: the start block has to occur
+	// once. Several stretches in one call would bring back the question of
+	// how they may overlap, for no call that needs it so far.
+	if a.rangeMode && a.countGiven {
+		return cliArgs{}, fmt.Errorf("-n cannot be used with --range")
+	}
+	if a.rangeMode && a.pairs {
+		return cliArgs{}, fmt.Errorf("--pairs cannot be used with --range; replace each stretch in a call of its own")
 	}
 	return a, nil
 }
@@ -279,7 +289,8 @@ func readTarget(path string) ([]byte, error) {
 
 // mismatchLines reports one count that is not the expected one: the count
 // line that count builds, and the hint that may follow it.
-func mismatchLines(count func(hinted bool) string, content, old, lfOld []byte, lines []int, expected int, asCRLF bool) []string {
+// noun is what the hint calls the block.
+func mismatchLines(count func(hinted bool) string, content, old, lfOld []byte, lines []int, expected int, asCRLF bool, noun string) []string {
 	// The hint is worked out first: a count line that is followed by one
 	// leaves out the suggestion to read the file that it would otherwise
 	// end with.
@@ -292,7 +303,7 @@ func mismatchLines(count func(hinted bool) string, content, old, lfOld []byte, l
 		if asCRLF {
 			hintContent = crlf.ToLF(hintContent)
 		}
-		hint = occur.Hint(hintContent, lfOld)
+		hint = occur.HintAs(hintContent, lfOld, noun)
 	} else {
 		// Nothing is missing here. What helps instead is telling the places
 		// that were found apart, to widen the block around one.
@@ -344,7 +355,7 @@ func runPairs(a cliArgs, input []byte, stdout, stderr io.Writer) int {
 		checked[i] = pair{label, old, new, lines}
 		if len(lines) != 1 {
 			count := func(hinted bool) string { return occur.PairMismatch(label, lines, hinted) }
-			report = append(report, mismatchLines(count, content, old, p.Old, lines, 1, asCRLF)...)
+			report = append(report, mismatchLines(count, content, old, p.Old, lines, 1, asCRLF, "old block")...)
 		}
 	}
 	if len(report) > 0 {
@@ -376,6 +387,62 @@ func runPairs(a cliArgs, input []byte, stdout, stderr io.Writer) int {
 	return exitOK
 }
 
+// runRange is run for --range: the stretch from the start block through the
+// first end block after it is replaced by the new block. The start block has
+// to occur exactly once, which is what makes the stretch one place, and the
+// lines it covered are always reported, since they were never shown in full.
+func runRange(a cliArgs, input []byte, stdout, stderr io.Writer) int {
+	r, err := block.SplitRange(input, []byte(a.separator))
+	if err != nil {
+		fmt.Fprintln(stderr, "sub1:", err)
+		return exitUsage
+	}
+	content, err := readTarget(a.path)
+	if err != nil {
+		fmt.Fprintln(stderr, "sub1:", err)
+		return exitFile
+	}
+	start, end, new := r.Start, r.End, r.New
+	asCRLF := crlf.Uniform(content) && !bytes.ContainsRune(start, '\r') && !bytes.ContainsRune(end, '\r') && !bytes.ContainsRune(new, '\r')
+	if asCRLF {
+		start, end, new = crlf.ToCRLF(start), crlf.ToCRLF(end), crlf.ToCRLF(new)
+	}
+	st := occur.FindStretch(content, start, end)
+	if len(st.Starts) != 1 {
+		count := func(hinted bool) string { return occur.StartMismatch(a.path, st.Starts, hinted) }
+		fmt.Fprintln(stderr, strings.Join(mismatchLines(count, content, start, r.Start, st.Starts, 1, asCRLF, "start block"), "\n"))
+		return exitMismatch
+	}
+	if st.End < 0 {
+		if len(st.Before) > 0 {
+			fmt.Fprintln(stderr, "sub1: "+occur.EndMismatch(a.path, st.Starts[0], st.Before, false))
+			return exitMismatch
+		}
+		// The hint looks only after the start block, where the end block
+		// has to be.
+		count := func(hinted bool) string { return occur.EndMismatch(a.path, st.Starts[0], nil, hinted) }
+		after := occur.MaskBefore(content, st.Begin+len(start))
+		fmt.Fprintln(stderr, strings.Join(mismatchLines(count, after, end, r.End, nil, 1, asCRLF, "end block"), "\n"))
+		return exitMismatch
+	}
+	// The stretch occurs once in the file, as FindStretch explains, so it
+	// can be replaced as an old block would be, deleting whole lines the
+	// same way when the new block is empty.
+	old := content[st.Begin:st.End]
+	if err := atomicfile.WriteFile(a.path, occur.Replace(content, old, new)); err != nil {
+		fmt.Fprintln(stderr, "sub1:", fileError(a.path, err))
+		return exitFile
+	}
+	var notes []string
+	if asCRLF {
+		notes = append(notes, "CRLF")
+	}
+	notes = append(notes, occur.Notes(content, old, new)...)
+	first, last := st.Lines(content)
+	fmt.Fprintln(stdout, occur.RangeSummary(a.path, first, last, notes))
+	return exitOK
+}
+
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
 }
@@ -401,7 +468,11 @@ func run(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 
 	if isTerminal(stdin) {
-		fmt.Fprintln(stderr, "sub1: stdin is a terminal; pass the old and new blocks in a heredoc (see --help)")
+		blocks := "the old and new blocks"
+		if a.rangeMode {
+			blocks = "the start, end and new blocks"
+		}
+		fmt.Fprintf(stderr, "sub1: stdin is a terminal; pass %s in a heredoc (see --help)\n", blocks)
 		return exitUsage
 	}
 	input, err := io.ReadAll(stdin)
@@ -414,6 +485,9 @@ func run(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 	if a.pairs {
 		return runPairs(a, input, stdout, stderr)
+	}
+	if a.rangeMode {
+		return runRange(a, input, stdout, stderr)
 	}
 	blocks, err := block.Split(input, []byte(a.separator))
 	if err != nil {
@@ -439,7 +513,7 @@ func run(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	lines := occur.Lines(content, old)
 	if len(lines) != a.expected {
 		count := func(hinted bool) string { return occur.Mismatch(a.path, lines, a.expected, hinted) }
-		fmt.Fprintln(stderr, strings.Join(mismatchLines(count, content, old, blocks.Old, lines, a.expected, asCRLF), "\n"))
+		fmt.Fprintln(stderr, strings.Join(mismatchLines(count, content, old, blocks.Old, lines, a.expected, asCRLF, "old block"), "\n"))
 		return exitMismatch
 	}
 	if err := atomicfile.WriteFile(a.path, occur.Replace(content, old, new)); err != nil {
