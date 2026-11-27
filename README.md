@@ -59,7 +59,7 @@ To replace part of a file from the shell, use `sub1` instead of sed or an ad-hoc
     ====
     SUB1
 
-The file is rewritten only when the old block occurs exactly once. Otherwise nothing is written and the message says what to do next. To change several places in one file, pass `--pairs` and write the old/new pairs one after another. See `sub1 --help` for options.
+The file is rewritten only when the old block occurs exactly once. Otherwise nothing is written and the message says what to do next. To change several places in one file, pass `--pairs` and write the old/new pairs one after another. To replace a long stretch without copying it, pass `--range` and write three blocks: the first lines of the stretch, its last lines, and the text that replaces all of it. See `sub1 --help` for options.
 ```
 
 That paragraph is all the agent needs; everything else it has to know arrives in the output of the call that needed it. `sub1 --instructions` prints the same paragraph, for setup scripts and machines where this page is not at hand.
@@ -214,6 +214,38 @@ sub1: handlers.py: pair 2: old block found 0 times, expected 1
 
 Two pairs whose old blocks share text in the file are refused the same way, since both would rewrite it: `sub1: handlers.py: pair 2 overlaps pair 1 at line 5; shorten one of the two old blocks so they do not share text`. Every pair is expected exactly once, so `-n` does not go with `--pairs`; a block that occurs several times gets a call of its own with `-n`.
 
+A long stretch, such as a Markdown section or a whole function, does not have to be copied into the old block. With `--range`, the first block is the start of the stretch, the second its end, and the third what replaces all of it, the start and end blocks included. Here the `## Install` section is rewritten, and `## Usage`, which closes the stretch, is written again so that it stays:
+
+```
+$ sub1 --range README.md <<'SUB1'
+## Install
+====
+## Usage
+====
+## Install
+
+Install it with Homebrew.
+
+## Usage
+====
+SUB1
+README.md: replaced lines 3-8 (6 lines)
+```
+
+The lines the stretch covered are always reported, since the call never showed them in full. A count larger than expected means the end block matched further down than meant. The start block has to occur exactly once, and the stretch ends at the first end block after it:
+
+```
+$ sub1 --range README.md <<'SUB1'
+## Usage
+====
+## Install
+====
+x
+====
+SUB1
+sub1: README.md: end block found 0 times after the start block (line 8); it occurs before the start block, at line 3
+```
+
 ## Reference
 
 ```
@@ -221,7 +253,7 @@ $ sub1 --help
 sub1 — replace a literal text block in a file, exactly once.
 
 Usage:
-  sub1 [-n N | --pairs] [-d SEP] [--] FILE <<'SUB1'
+  sub1 [-n N | --pairs | --range] [-d SEP] [--] FILE <<'SUB1'
   old text (one or more lines)
   ====
   new text (zero or more lines)
@@ -247,13 +279,13 @@ Examples:
   ====
   SUB1
 
-  sub1 -d @@ README.md <<'SUB1'     # a block holds a "====" line
-  Title
+  sub1 --range notes.md <<'SUB1'    # replace from "## Old" through "## Next"
+  ## Old
   ====
-  @@
-  Title
-  -----
-  @@
+  ## Next
+  ====
+  ## Next
+  ====
   SUB1
 
   sub1 handlers.py <<'SUB1'         # an empty new block deletes the whole line
@@ -266,16 +298,14 @@ Options:
   -n N            expect OLD N times and replace all N (default 1)
   -d SEP          line that ends OLD and ends NEW (default "====")
   --pairs         read several OLD/NEW pairs in a row, each OLD exactly once
+  --range         read START, END, NEW; replace START through the next END
   -h, --help      show this help
   -v, --version   show the version
   --instructions  print the paragraph for the agent's instruction file
 
-Notes:
-  "(...)" after "replaced at line N" is a note, not an error: check the edit.
-
 Exit codes:
-  0  replaced
-  1  OLD found a different number of times than expected, or pairs overlap
+  0  replaced; "(...)" at the end of the line is a note: check the edit
+  1  OLD (or START, END) not found as expected, or pairs overlap
   2  input error: the flags or the blocks on stdin
   3  file error: stdin or FILE could not be read, or FILE could not be written
 ```
@@ -286,6 +316,7 @@ Exit codes:
 - The closing `====` line is required. A heredoc ends at the first line equal to its terminator, so a terminator written on the separator line by mistake, or one that also appears inside a block, ends the heredoc early. The input that reaches `sub1` then stops before the closing line, and it is rejected instead of being applied as if it were whole. What the shell cut off, though, it runs as commands, so pick a terminator the blocks cannot contain: a file that quotes `sub1` holds lines that are exactly `SUB1` — this page, the `CLAUDE.md` you pasted the paragraph into, test fixtures — and editing one of those with `<<'SUB1'` ends the heredoc on the wrong line.
 - If either block contains a line that is exactly `====` (a Markdown setext underline, or a quoted `sub1` call, for example), pass another separator with `-d`. The message that rejects such an input names one that no line of the input holds, ready to paste.
 - With `--pairs`, the pairs are cut by position: every two separator lines close one pair, so the count has to be even. A content line that equals the separator cannot be told from one here either, and an even count would be read as pairs other than the ones meant, so pick a separator with `-d` that no line of any block holds. Each pair is held to the rules for a single pair, two pairs may not have the same old block, and an empty new block deletes whole lines as it does on its own. Whether a deletion takes the line break after it is decided against the file as given: deleting the two halves of one line in two pairs leaves the line break, where two separate calls would remove it.
+- With `--range`, the stretch runs from the start of the start block through the end of the first end block that begins after the start block ends, so the two never share text. Matching is byte-exact as for an old block, and a CRLF file is read as CRLF in the same way. The stretch is then replaced as an old block would be, so an empty new block deletes it, whole lines and the line break after them included. `-n` and `--pairs` do not go with `--range`: one stretch is replaced per call.
 - The file is never left half-written, and nothing is written at all until the replacement is settled. Every error above leaves the file byte for byte as it was. The new contents go to a temporary `.sub1-*` file next to it, which is then renamed into place. If `sub1` is interrupted, the file still has either the old or the new contents, and any leftover `.sub1-*` file can be deleted. On Linux and macOS the rename swaps the file in one step. On Windows it goes through `MoveFileEx`, which Windows does not document as atomic.
 - Because of that rename, the file that ends up in place is a new one. Its permissions are copied over from the old file; its owner, ACLs and extended attributes are not, so it belongs to the user who ran `sub1`. The directory must be writable, and hard links to the file are not preserved.
 - The file is not locked. A write another program makes between `sub1` reading the file and renaming the new contents into place is lost.
@@ -304,6 +335,9 @@ The shapes below are stable. Later versions may add to them; they will not rewor
 | stdout, `--pairs`, replaced | one line per pair, in input order: `FILE: pair K: replaced at line N` or `FILE: pair K: replaced at lines N, M, ...` |
 | stderr, `--pairs`, wrong count (exit 1) | one count line per failing pair, `sub1: FILE: pair K: old block found ...` as for a single block, each followed by its own hint line when there is one |
 | stderr, `--pairs`, overlap (exit 1) | `sub1: FILE: pair K overlaps pair J at line N` |
+| stdout, `--range`, replaced | `FILE: replaced lines N-M`, or `FILE: replaced line N` for a stretch within one line. Notes follow in parentheses as on any successful line, and one of them always counts the lines, as `(6 lines)` |
+| stderr, `--range`, start block (exit 1) | `sub1: FILE: start block found ...` in the shapes of a wrong count, with `expected 1`, and a hint line when there is one |
+| stderr, `--range`, end block (exit 1) | `sub1: FILE: end block found 0 times after the start block (line N)`, and a hint line when there is one |
 
 `FILE` is the path as it was given on the command line, in every line above.
 
@@ -316,7 +350,7 @@ The input is stable as well: the old and new blocks each closed by a separator l
 - Regular expressions. The blocks are literal bytes.
 - Editing more than one file per call. Run `sub1` once per file.
 - Reading the text to edit from stdin. stdin carries the blocks; the file to edit is named on the command line and rewritten in place.
-- Ranges such as "from this line to that line". `sub1` only replaces text it was shown, so it never removes more than you wrote in the old block, plus the one line break that follows each occurrence when an empty new block deletes whole lines.
+- Line numbers. A stretch is found by the text it starts and ends with, never by its line numbers, which go stale with every edit above it. Without `--range`, `sub1` only replaces text it was shown, so it never removes more than you wrote in the old block, plus the one line break that follows each occurrence when an empty new block deletes whole lines.
 
 ## License
 

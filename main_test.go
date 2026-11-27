@@ -48,6 +48,9 @@ func TestParseArgs(t *testing.T) {
 		{"pairs with separator", []string{"f.txt", "--pairs", "-d", "%%"}, with(func(a *cliArgs) { a.pairs = true; a.separator = "%%"; a.path = "f.txt" }), ""},
 		{"pairs with count", []string{"--pairs", "-n", "2", "f.txt"}, cliArgs{}, "-n cannot be used with --pairs"},
 		{"count with pairs", []string{"-n", "1", "f.txt", "--pairs"}, cliArgs{}, "-n cannot be used with --pairs"},
+		{"range", []string{"--range", "f.txt"}, with(func(a *cliArgs) { a.rangeMode = true; a.path = "f.txt" }), ""},
+		{"range with count", []string{"--range", "-n", "2", "f.txt"}, cliArgs{}, "-n cannot be used with --range"},
+		{"range with pairs", []string{"--range", "--pairs", "f.txt"}, cliArgs{}, "--pairs cannot be used with --range; replace each stretch in a call of its own"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -797,5 +800,86 @@ func TestRun_withoutPairsSeveralPairsAreStillRefused(t *testing.T) {
 	r := runWith([]string{path}, "a\n====\nA\n====\nb\n====\nB\n====\n")
 	if r.code != exitUsage || !strings.Contains(r.stderr, `found 4 "====" lines, expected 2`) {
 		t.Fatalf("exit = %d, stderr = %q", r.code, r.stderr)
+	}
+}
+
+func TestRun_rangeReplacesFromStartThroughEnd(t *testing.T) {
+	path := writeTemp(t, "# T\n\n## Old\na\nb\n\n## Next\nc\n")
+	r := runWith([]string{"--range", path}, "## Old\n====\n## Next\n====\n## New\nx\n\n## Next\n====\n")
+	if r.code != exitOK || r.stderr != "" {
+		t.Fatalf("exit = %d, stderr = %q", r.code, r.stderr)
+	}
+	if want := path + ": replaced lines 3-7 (5 lines)\n"; r.stdout != want {
+		t.Errorf("stdout = %q, want %q", r.stdout, want)
+	}
+	if got, want := readBack(t, path), "# T\n\n## New\nx\n\n## Next\nc\n"; got != want {
+		t.Errorf("file = %q, want %q", got, want)
+	}
+}
+
+func TestRun_rangeWithEmptyNewDeletesTheLines(t *testing.T) {
+	path := writeTemp(t, "keep\nfrom\nmid\nto\nkeep too\n")
+	r := runWith([]string{"--range", path}, "from\n====\nto\n====\n====\n")
+	if r.code != exitOK || r.stdout != path+": replaced lines 2-4 (3 lines)\n" {
+		t.Fatalf("exit = %d, stdout = %q, stderr = %q", r.code, r.stdout, r.stderr)
+	}
+	if got, want := readBack(t, path), "keep\nkeep too\n"; got != want {
+		t.Errorf("file = %q, want %q", got, want)
+	}
+}
+
+func TestRun_rangeInCRLFFile(t *testing.T) {
+	path := writeTemp(t, "a\r\nb\r\nc\r\nd\r\n")
+	r := runWith([]string{"--range", path}, "b\n====\nc\n====\nB\n====\n")
+	if r.code != exitOK || r.stdout != path+": replaced lines 2-3 (2 lines; CRLF)\n" {
+		t.Fatalf("exit = %d, stdout = %q, stderr = %q", r.code, r.stdout, r.stderr)
+	}
+	if got, want := readBack(t, path), "a\r\nB\r\nd\r\n"; got != want {
+		t.Errorf("file = %q, want %q", got, want)
+	}
+}
+
+func TestRun_rangeMismatchesWriteNothing(t *testing.T) {
+	content := "x\nfrom\ny\nfrom\nend\nlast\n"
+	for _, tt := range []struct{ stdin, want string }{
+		{"from\n====\nend\n====\nz\n====\n", ": start block found 2 times (lines 2, 4), expected 1; widen the start block to match only 1\n"},
+		{"missing\n====\nend\n====\nz\n====\n", ": start block found 0 times, expected 1; no similar text found, read the file again\n"},
+		{"last\n====\nx\n====\nz\n====\n", ": end block found 0 times after the start block (line 6); it occurs before the start block, at line 1\n"},
+		{"y\n====\nmissing\n====\nz\n====\n", ": end block found 0 times after the start block (line 3); no similar text found, read the file again\n"},
+	} {
+		path := writeTemp(t, content)
+		r := runWith([]string{"--range", path}, tt.stdin)
+		if r.code != exitMismatch || r.stdout != "" || !strings.HasPrefix(r.stderr, "sub1: "+path+tt.want) {
+			t.Errorf("%q: exit = %d, stdout = %q, stderr = %q, want %q", tt.stdin, r.code, r.stdout, r.stderr, tt.want)
+		}
+		if got := readBack(t, path); got != content {
+			t.Errorf("%q: file = %q, want it untouched", tt.stdin, got)
+		}
+	}
+}
+
+func TestRun_rangeInputErrorsNameNoFile(t *testing.T) {
+	path := writeTemp(t, "a\nb\n")
+	r := runWith([]string{"--range", path}, "a\n====\nb\n====\n")
+	want := "sub1: found 2 \"====\" lines, expected 3 with --range: one after the start block, one after the end block, and one after the new block, even an empty one\n"
+	if r.code != exitUsage || r.stderr != want {
+		t.Fatalf("exit = %d, stderr = %q, want %q", r.code, r.stderr, want)
+	}
+}
+
+func TestRun_rangeHintsNameTheBlockAndLookAfterTheStart(t *testing.T) {
+	// "from x" on line 1 is what the mistyped end blocks come closest to,
+	// but it is above the start block, so only the line after it is named.
+	content := "from x\nstart\nmid\nfrom y\n"
+	for _, tt := range []struct{ stdin, want string }{
+		{"  start\n====\nmid\n====\nz\n====\n", "  hint: file line 2 starts with no indentation, start block line 1 with 2 spaces (near line 2)\n"},
+		{"start\n====\nfrom  y\n====\nz\n====\n", "  hint: file line 4 has 1 space where the end block has 2 spaces (near line 4)\n"},
+		{"start\n====\nfrom  x\n====\nz\n====\n", "(line 2); no similar text found, read the file again\n"},
+	} {
+		path := writeTemp(t, content)
+		r := runWith([]string{"--range", path}, tt.stdin)
+		if r.code != exitMismatch || !strings.HasSuffix(r.stderr, tt.want) {
+			t.Errorf("%q: exit = %d, stderr = %q, want ending with %q", tt.stdin, r.code, r.stderr, tt.want)
+		}
 	}
 }

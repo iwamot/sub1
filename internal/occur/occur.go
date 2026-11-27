@@ -196,13 +196,28 @@ func offsets(content, old []byte) []int {
 func Mask(content, old []byte) []byte {
 	masked := bytes.Clone(content)
 	for _, pos := range offsets(content, old) {
-		for i := pos; i < pos+len(old); i++ {
-			if masked[i] != '\n' && masked[i] != '\r' {
-				masked[i] = 0
-			}
-		}
+		blank(masked[pos : pos+len(old)])
 	}
 	return masked
+}
+
+// MaskBefore returns a copy of content with the first n bytes blanked out the
+// way Mask blanks a match, so that a hint for the end block of --range only
+// looks where the end block may be: after the start block. A line it named
+// above would lead to a block that is then found before the start block.
+func MaskBefore(content []byte, n int) []byte {
+	masked := bytes.Clone(content)
+	blank(masked[:n])
+	return masked
+}
+
+// blank puts NUL in place of every byte of b but line breaks.
+func blank(b []byte) {
+	for i, c := range b {
+		if c != '\n' && c != '\r' {
+			b[i] = 0
+		}
+	}
 }
 
 // Summary is the one-line report printed after a successful replacement.
@@ -295,7 +310,7 @@ func matches(n int, singular, plural string) string {
 // moves, so the way out of a count that is too high reads the same whether a
 // hint follows it or not.
 func Mismatch(path string, lines []int, expected int, hinted bool) string {
-	return mismatch(path, lines, expected, remedy(len(lines), expected, hinted))
+	return mismatch(path, "old block", lines, expected, remedy(len(lines), expected, hinted))
 }
 
 // PairMismatch is Mismatch for one pair of --pairs, which expects every old
@@ -311,16 +326,104 @@ func PairMismatch(label string, lines []int, hinted bool) string {
 	case found == 0 && !hinted:
 		tail = "; no similar text found, read the file again"
 	}
-	return mismatch(label, lines, 1, tail)
+	return mismatch(label, "old block", lines, 1, tail)
 }
 
-func mismatch(path string, lines []int, expected int, tail string) string {
+// StartMismatch is Mismatch for the start block of --range, which has to
+// occur exactly once. -n does not go with --range, since one stretch is
+// replaced per call, so a start block found several times can only be
+// widened.
+func StartMismatch(path string, lines []int, hinted bool) string {
+	found := len(lines)
+	tail := remedy(found, 1, hinted)
+	switch {
+	case found > 1:
+		tail = "; widen the start block to match only 1"
+	case found == 0 && !hinted:
+		tail = "; no similar text found, read the file again"
+	}
+	return mismatch(path, "start block", lines, 1, tail)
+}
+
+// EndMismatch is the report for an end block that does not occur after the
+// start block, which starts on line start. before lists the lines it does
+// occur on before the start block, if any. Those are stated as found, not
+// read as the two blocks being swapped: the end block may as well be
+// mistyped and happen to match something above.
+func EndMismatch(path string, start int, before []int, hinted bool) string {
+	s := fmt.Sprintf("%s: end block found 0 times after the start block (line %d)", path, start)
+	switch {
+	case len(before) > 0:
+		s += fmt.Sprintf("; it occurs before the start block, at %s", lineList(before))
+	case !hinted:
+		s += "; no similar text found, read the file again"
+	}
+	return s
+}
+
+func mismatch(path, noun string, lines []int, expected int, tail string) string {
 	where := ""
 	if len(lines) > 0 {
 		where = " (" + lineList(lines) + ")"
 	}
-	return fmt.Sprintf("%s: old block found %s%s, expected %d%s",
-		path, times(len(lines)), where, expected, tail)
+	return fmt.Sprintf("%s: %s found %s%s, expected %d%s",
+		path, noun, times(len(lines)), where, expected, tail)
+}
+
+// Stretch is what --range finds in content: the lines its start block
+// occurs on, and, when that is exactly one line and the end block occurs
+// after it, the bytes from the start block through the first such end block.
+// Otherwise End is -1, and Before lists the lines the end block occurs on
+// before the start block.
+//
+// The end block is looked for from where the start block ends, so the two
+// never share text, and the first occurrence is taken: the stretch is the
+// shortest one that begins with the start block and ends with the end block.
+// The text of the stretch therefore occurs exactly once in content, since
+// every occurrence of it begins with an occurrence of the start block.
+type Stretch struct {
+	Starts     []int
+	Begin, End int
+	Before     []int
+}
+
+// FindStretch locates the stretch --range replaces.
+func FindStretch(content, start, end []byte) Stretch {
+	st := Stretch{Starts: Lines(content, start), End: -1}
+	if len(st.Starts) != 1 {
+		return st
+	}
+	st.Begin = bytes.Index(content, start)
+	from := st.Begin + len(start)
+	if i := bytes.Index(content[from:], end); i >= 0 {
+		st.End = from + i + len(end)
+		return st
+	}
+	st.Before = Lines(content[:st.Begin], end)
+	return st
+}
+
+// Lines returns the first and the last line the stretch touches, 1-based.
+func (st Stretch) Lines(content []byte) (first, last int) {
+	first = 1 + bytes.Count(content[:st.Begin], newline)
+	last = 1 + bytes.Count(content[:st.End-1], newline)
+	return first, last
+}
+
+// RangeSummary is the one-line report printed after --range replaced a
+// stretch. The number of lines comes first among the notes, so that a
+// stretch longer than the caller meant stands out.
+func RangeSummary(path string, first, last int, notes []string) string {
+	where := fmt.Sprintf("line %d", first)
+	if last > first {
+		where = fmt.Sprintf("lines %d-%d", first, last)
+	}
+	n := last - first + 1
+	count := fmt.Sprintf("%d lines", n)
+	if n == 1 {
+		count = "1 line"
+	}
+	return fmt.Sprintf("%s: replaced %s (%s)", path, where, strings.Join(append([]string{count}, notes...), "; "))
 }
 
 // remedy names the way out of a count mismatch, with the counts filled in so
@@ -451,6 +554,13 @@ func withoutLineEnding(line []byte) []byte {
 // runs into it: "near lines 1, 3, file line 1 starts with" hides where the
 // list ends.
 func Hint(content, old []byte) string {
+	return HintAs(content, old, "old block")
+}
+
+// HintAs is Hint for a block the caller calls something other than the old
+// block, as --range does its start and end blocks. noun is what the hint
+// calls the block where it names its lines.
+func HintAs(content, old []byte, noun string) string {
 	// CRLF line endings are folded away on the file side only, and stated
 	// first when present. A file with CRLF usually differs in something else
 	// as well, and the "\r" would otherwise hide a trailing-whitespace
@@ -494,19 +604,19 @@ func Hint(content, old []byte) string {
 			continue
 		}
 		if mixed {
-			if note := describeCRLF(raw, old, lines[0]); note != "" {
+			if note := describeCRLF(raw, old, lines[0], noun); note != "" {
 				notes = append(notes, note)
 			}
 		}
 		if n.describe != nil {
-			notes = append(notes, n.describe(content, old, lines[0]))
+			notes = append(notes, n.describe(content, old, lines[0], noun))
 		}
 		// The identity normalization has nothing of its own to say, and it
 		// only matches at all when the line endings were folded above, which
 		// leaves a note behind: old does not occur in content as it stands.
 		return fmt.Sprintf("%s (near %s)", strings.Join(notes, "; "), lineList(lines))
 	}
-	line, note := runHint(content, old)
+	line, note := runHint(content, old, noun)
 	if line == 0 {
 		line, note = closestLine(content, old)
 	}
@@ -527,7 +637,7 @@ func Hint(content, old []byte) string {
 // which catches a file that differs in line endings alone.
 type normalization struct {
 	apply    func([]byte) []byte
-	describe func(content, old []byte, line int) string
+	describe func(content, old []byte, line int, noun string) string
 }
 
 var normalizations = []normalization{
@@ -550,14 +660,14 @@ func trailingWhitespace(b []byte) []byte {
 // that carries the same whitespace on both sides and so matches, and naming
 // one side alone reads as if the other end were bare when both carry
 // whitespace and only the amount differs.
-func describeTrailingWhitespace(content, old []byte, line int) string {
+func describeTrailingWhitespace(content, old []byte, line int, noun string) string {
 	oldLines, fileLines := region(content, old, line)
 	i := 0
 	for i+1 < len(oldLines) && bytes.Equal(trailing(fileLines[i]), trailing(oldLines[i])) {
 		i++
 	}
-	return fmt.Sprintf("file line %d ends with %s, old block line %d with %s",
-		line+i, describeTrailing(trailing(fileLines[i])), i+1, describeTrailing(trailing(oldLines[i])))
+	return fmt.Sprintf("file line %d ends with %s, %s line %d with %s",
+		line+i, describeTrailing(trailing(fileLines[i])), noun, i+1, describeTrailing(trailing(oldLines[i])))
 }
 
 // trailing returns the run of spaces and tabs at the end of line.
@@ -579,14 +689,14 @@ func leadingWhitespace(b []byte) []byte {
 // describeLeadingWhitespace compares the indentation of old and of the
 // matched region of content line by line and reports the first pair that
 // differs. One must, or the blocks would have matched as they are.
-func describeLeadingWhitespace(content, old []byte, line int) string {
+func describeLeadingWhitespace(content, old []byte, line int, noun string) string {
 	oldLines, fileLines := region(content, old, line)
 	i := 0
 	for i+1 < len(oldLines) && bytes.Equal(indent(fileLines[i]), indent(oldLines[i])) {
 		i++
 	}
-	return fmt.Sprintf("file line %d starts with %s, old block line %d with %s",
-		line+i, describeIndent(indent(fileLines[i])), i+1, describeIndent(indent(oldLines[i])))
+	return fmt.Sprintf("file line %d starts with %s, %s line %d with %s",
+		line+i, describeIndent(indent(fileLines[i])), noun, i+1, describeIndent(indent(oldLines[i])))
 }
 
 func indent(line []byte) []byte {
@@ -640,14 +750,14 @@ func innerWhitespace(b []byte) []byte {
 // differs from old as written and reports the first run of whitespace whose
 // two versions disagree. The lines are equal once every run is collapsed to
 // one space, so the runs pair up one to one.
-func describeInnerWhitespace(content, old []byte, line int) string {
+func describeInnerWhitespace(content, old []byte, line int, noun string) string {
 	oldLines, fileLines := region(content, old, line)
 	i := 0
 	for i+1 < len(oldLines) && bytes.Equal(oldLines[i], fileLines[i]) {
 		i++
 	}
 	fileRun, oldRun := differingRuns(fileLines[i], oldLines[i])
-	return fmt.Sprintf("file line %d has %s where the old block has %s", line+i, describeRun(fileRun), describeRun(oldRun))
+	return fmt.Sprintf("file line %d has %s where the %s has %s", line+i, describeRun(fileRun), noun, describeRun(oldRun))
 }
 
 // differingRuns returns the first pair of whitespace runs, at the same place
@@ -697,7 +807,7 @@ func region(content, old []byte, line int) (oldLines, fileLines [][]byte) {
 // old block has LF, or returns "" when there are none. The last line the old
 // block covers is left out: the old block ends before that line's break, so
 // the break is not part of what has to match.
-func describeCRLF(raw, old []byte, line int) string {
+func describeCRLF(raw, old []byte, line int, noun string) string {
 	fileLines := bytes.SplitAfter(raw, newline)[line-1:]
 	var lines []int
 	for i := range bytes.Count(old, newline) {
@@ -716,7 +826,7 @@ func describeCRLF(raw, old []byte, line int) string {
 	if len(lines) > 1 {
 		verb = "end"
 	}
-	return fmt.Sprintf("file %s %s with CRLF, old block %s with LF", lineRuns(fileNums), verb, lineRuns(lines))
+	return fmt.Sprintf("file %s %s with CRLF, %s %s with LF", lineRuns(fileNums), verb, noun, lineRuns(lines))
 }
 
 // lineRuns renders ascending line numbers the way lineList does, with each
@@ -762,7 +872,7 @@ func mapLines(b []byte, f func([]byte) []byte) []byte {
 // The run never covers all of old: if it did, old as a whole would occur in
 // content. On a tie the earliest place in the file wins, and within it the
 // earliest place in old.
-func runHint(content, old []byte) (int, string) {
+func runHint(content, old []byte, noun string) (int, string) {
 	oldLines := bytes.Split(old, newline)
 	if len(oldLines) < 2 {
 		return 0, ""
@@ -808,8 +918,8 @@ func runHint(content, old []byte) (int, string) {
 			note += fmt.Sprintf(": file line %d is %s", facing+1, quoteLine(text))
 		}
 	}
-	return bestFile + 1, fmt.Sprintf("lines %d-%d of the old block match file lines %d-%d; %s",
-		bestOld+1, bestOld+best, bestFile+1, bestFile+best, note)
+	return bestFile + 1, fmt.Sprintf("lines %d-%d of the %s match file lines %d-%d; %s",
+		bestOld+1, bestOld+best, noun, bestFile+1, bestFile+best, note)
 }
 
 // fileLine returns the line of the file at the 0-based index, and whether
