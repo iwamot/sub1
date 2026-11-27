@@ -5,6 +5,7 @@ package occur
 import (
 	"bytes"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -67,21 +68,89 @@ func Lines(content, old []byte) []int {
 // starts with belongs to that occurrence and is deleted with it, so every
 // occurrence that was counted is deleted whole.
 func Replace(content, old, new []byte) []byte {
+	return Apply(content, Edits(content, old, new))
+}
+
+// Edit is one occurrence to rewrite: content[Start:End] becomes New. OldEnd
+// is where the old block itself ends. End is past it by the line break an
+// empty new block deletes along with a whole-line old block, as described at
+// Replace, and is OldEnd otherwise.
+type Edit struct {
+	Start, OldEnd, End int
+	New                []byte
+}
+
+// Edits returns the edit for each non-overlapping occurrence of old in
+// content, in order: the occurrences Lines counts and Replace rewrites.
+func Edits(content, old, new []byte) []Edit {
+	found := offsets(content, old)
+	edits := make([]Edit, 0, len(found))
+	for _, i := range found {
+		e := Edit{Start: i, OldEnd: i + len(old), New: new}
+		e.End = e.OldEnd
+		if len(new) == 0 && (i == 0 || content[i-1] == '\n') && !bytes.HasSuffix(old, newline) {
+			e.End += lineBreakLen(content[e.OldEnd:])
+		}
+		edits = append(edits, e)
+	}
+	return edits
+}
+
+// Apply returns content with the edits made, all against content as given.
+// The edits are in order and their old blocks do not overlap. A line break
+// that one edit would delete is kept when the next edit starts on it, so that
+// the next edit's old block is rewritten whole.
+func Apply(content []byte, edits []Edit) []byte {
 	var out []byte
 	pos := 0
-	found := offsets(content, old)
-	for k, i := range found {
-		out = append(out, content[pos:i]...)
-		out = append(out, new...)
-		pos = i + len(old)
-		if len(new) == 0 && (i == 0 || content[i-1] == '\n') && !bytes.HasSuffix(old, newline) {
-			brk := lineBreakLen(content[pos:])
-			if k+1 == len(found) || found[k+1] >= pos+brk {
-				pos += brk
-			}
+	for k, e := range edits {
+		out = append(out, content[pos:e.Start]...)
+		out = append(out, e.New...)
+		pos = e.End
+		if k+1 < len(edits) && edits[k+1].Start < e.End {
+			pos = e.OldEnd
 		}
 	}
 	return append(out, content[pos:]...)
+}
+
+// Overlap is two pairs whose old blocks share text in the file: First and
+// Second are their indexes, First the lower, and Line the 1-based line where
+// the later of the two occurrences starts.
+type Overlap struct {
+	First, Second, Line int
+}
+
+// Merge puts the edits of several pairs, each list in order as Edits returns
+// it, into one list in file order for Apply. It reports the first place where
+// an occurrence of one pair starts inside an occurrence of another, scanning
+// the file from the top, since applying both would rewrite the same text
+// twice. Every position is one in content as given, so no pair is matched
+// against what another pair has already written.
+func Merge(content []byte, sets [][]Edit) ([]Edit, *Overlap) {
+	type owned struct {
+		Edit
+		pair int
+	}
+	var all []owned
+	for p, edits := range sets {
+		for _, e := range edits {
+			all = append(all, owned{e, p})
+		}
+	}
+	sort.SliceStable(all, func(i, j int) bool { return all[i].Start < all[j].Start })
+	merged := make([]Edit, 0, len(all))
+	for k, e := range all {
+		if k > 0 && e.Start < all[k-1].OldEnd {
+			a, b := all[k-1].pair, e.pair
+			if a > b {
+				a, b = b, a
+			}
+			return nil, &Overlap{First: a, Second: b, Line: 1 + bytes.Count(content[:e.Start], newline)}
+		}
+		merged = append(merged, e.Edit)
+	}
+	return merged, nil
 }
 
 // lineBreakLen returns the length of the line break b starts with, or 0.
@@ -226,12 +295,32 @@ func matches(n int, singular, plural string) string {
 // moves, so the way out of a count that is too high reads the same whether a
 // hint follows it or not.
 func Mismatch(path string, lines []int, expected int, hinted bool) string {
+	return mismatch(path, lines, expected, remedy(len(lines), expected, hinted))
+}
+
+// PairMismatch is Mismatch for one pair of --pairs, which expects every old
+// block once. label is the path and the pair's number. -n does not go with
+// --pairs, so where Mismatch offers it, this offers the call of its own that
+// takes it.
+func PairMismatch(label string, lines []int, hinted bool) string {
+	found := len(lines)
+	tail := remedy(found, 1, hinted)
+	switch {
+	case found > 1:
+		tail = fmt.Sprintf("; widen the old block to match only 1, or replace all %d in a call of its own with -n %d", found, found)
+	case found == 0 && !hinted:
+		tail = "; no similar text found, read the file again"
+	}
+	return mismatch(label, lines, 1, tail)
+}
+
+func mismatch(path string, lines []int, expected int, tail string) string {
 	where := ""
 	if len(lines) > 0 {
 		where = " (" + lineList(lines) + ")"
 	}
 	return fmt.Sprintf("%s: old block found %s%s, expected %d%s",
-		path, times(len(lines)), where, expected, remedy(len(lines), expected, hinted))
+		path, times(len(lines)), where, expected, tail)
 }
 
 // remedy names the way out of a count mismatch, with the counts filled in so
